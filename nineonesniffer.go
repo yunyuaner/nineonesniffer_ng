@@ -3,6 +3,7 @@ package nineonesniffer
 import (
 	"bufio"
 	"compress/gzip"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/net/html"
 )
 
@@ -40,13 +42,14 @@ type ImageItem struct {
 }
 
 type VideoItem struct {
-	Title       string
-	Author      string
-	VideoTime   time.Duration
-	UploadTime  time.Time
-	VideoSource string
-	ViewKey     string
-	Thumbnail   ImageItem
+	Title                string
+	Author               string
+	VideoTime            time.Duration
+	UploadTime           time.Time
+	VideoDetailedPageURL string
+	VideoSource          string
+	ViewKey              string
+	Thumbnail            ImageItem
 }
 
 type VideoDataSet map[string]*VideoItem
@@ -123,9 +126,14 @@ func (sniffer *NineOneSniffer) Prefetch() {
 	sniffer.fetcher.fetchVideoList()
 }
 
+func (sniffer *NineOneSniffer) Fetch() {
+	sniffer.fetcher.fetchDetailedVideoPages()
+}
+
 func (sniffer *NineOneSniffer) RefreshDataset() {
 	sniffer.parser.refreshDataset()
-	sniffer.parser.peekDataset()
+	fmt.Printf("Got %d items\n", len(sniffer.ds))
+	sniffer.parser.persistDataset()
 }
 
 func (sniffer *NineOneSniffer) datasetAppend(key string, item *VideoItem) *VideoItem {
@@ -254,34 +262,57 @@ func nodeTypeToString(t html.NodeType) string {
 	return nodeTypeStr
 }
 
-func (parser *nineOneParser) parseVideoItem(n *html.Node) (*VideoItem, error) {
-	var item *VideoItem
+func (parser *nineOneParser) htmlDOMTraverse(node *html.Node,
+	visitor func(node *html.Node, data interface{}), data interface{}) {
+	visitor(node, data)
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		parser.htmlDOMTraverse(c, visitor, data)
+	}
+}
+
+func (parser *nineOneParser) parseVideoList(fileName string) (items []*VideoItem, err error) {
+	info, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := html.Parse(strings.NewReader(string(info)))
+	if err != nil {
+		return nil, err
+	}
+
+	parser.htmlDOMTraverse(doc, parser.videoListVisitor, items)
+	return items, nil
+}
+
+func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
+	items := data.([]*VideoItem)
 
 	if n.Type == html.ElementNode && n.Data == "a" {
-		var videoSource, imgSource string
+		var videoDetailedPageURL, imgSource string
 		var title string
 
 		attrVal, err := findAttrValueOfElementNode(n, "href")
 		if err != nil {
-			return nil, err
+			return
 		}
 
 		if strings.Contains(attrVal, "viewkey") && strings.Contains(attrVal, "viewtype") {
 			// Parse video source url
 			if where := strings.Index(attrVal, "page"); where >= 0 {
-				videoSource = attrVal[:where-1]
+				videoDetailedPageURL = attrVal[:where-1]
 			} else {
-				videoSource = attrVal
+				videoDetailedPageURL = attrVal
 			}
 
 			divElem, err := findFirstChildOfElementNode(n, "div")
 			if err != nil {
-				return nil, err
+				return
 			}
 
 			// Parse viewkey
-			pos := strings.Index(videoSource, "viewkey=")
-			viewkey := videoSource[pos+len("viewkey="):]
+			pos := strings.Index(videoDetailedPageURL, "viewkey=")
+			viewkey := videoDetailedPageURL[pos+len("viewkey="):]
 
 			// Parse img source url
 			imgElem, err := findFirstChildOfElementNode(divElem, "img")
@@ -297,7 +328,7 @@ func (parser *nineOneParser) parseVideoItem(n *html.Node) (*VideoItem, error) {
 			if match {
 				srcAttrVal, err := findAttrValueOfElementNode(imgElem, "src")
 				if err != nil {
-					return nil, err
+					return
 				}
 				imgSource = srcAttrVal
 			}
@@ -312,7 +343,7 @@ func (parser *nineOneParser) parseVideoItem(n *html.Node) (*VideoItem, error) {
 			// Parse video title
 			spanElem, err := findSiblingOfElementNode(divElem, "span")
 			if err != nil {
-				return nil, err
+				return
 			}
 
 			attrCompare := func(lhs string, rhs string) bool {
@@ -327,103 +358,46 @@ func (parser *nineOneParser) parseVideoItem(n *html.Node) (*VideoItem, error) {
 
 			attrVal, err = findAttrValueOfElementNode(spanElem, "class")
 			if err != nil {
-				return nil, err
+				return
 			}
 
-			//if strings.Contains(attrVal, "video-title") {
 			if match {
 				title, _ = getInnerHTMLOfElementNode(spanElem)
-				//for c := spanElem.FirstChild; c != nil; c = c.NextSibling {
-				//	if c.Type == html.TextNode {
-				//		title = c.Data
-				//	}
-				//}
-			}
-			//}
-
-			//vds = append(vds, &VideoItem{
-			//	Title:       title,
-			//	VideoSource: videoSource,
-			//	ViewKey:     viewkey,
-			//	Thumbnail:   ImageItem{ImgSource: imgSource, ImgName: imgName, ImgID: imgID},
-			//})
-
-			//sniffer := *(parser.sniffer)
-			//sniffer.ds.add(viewkey, &VideoItem{
-			//	Title:       title,
-			//	VideoSource: videoSource,
-			//	ViewKey:     viewkey,
-			//	Thumbnail:   ImageItem{ImgSource: imgSource, ImgName: imgName, ImgID: imgID},
-			//})
-			//fmt.Printf("title - %s, src - %s, img - %s\n", title, videoSource, imgSource)
-			//fmt.Printf("viewkey - %s, image name - %s\n", viewkey, imgName)
-			//fmt.Printf("wget --retries=10 -O ./data/images/%s %s\n", imgName, imgSource)
-
-			item = &VideoItem{
-				Title:       title,
-				VideoSource: videoSource,
-				ViewKey:     viewkey,
-				Thumbnail:   ImageItem{ImgSource: imgSource, ImgName: imgName, ImgID: imgID},
 			}
 
-			return item, nil
+			item := &VideoItem{
+				Title:                title,
+				VideoDetailedPageURL: videoDetailedPageURL,
+				ViewKey:              viewkey,
+				Thumbnail:            ImageItem{ImgSource: imgSource, ImgName: imgName, ImgID: imgID},
+			}
 
+			//fmt.Println(title)
+			//fmt.Println(videoSource)
+			//fmt.Println(imgSource)
+			//fmt.Println(imgName)
+			//fmt.Println(imgID)
+			//fmt.Println(viewkey)
+			//fmt.Printf("\n")
+
+			items = append(items, item)
 		}
 
 	}
-
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		item, _ := parser.parseVideoItem(c)
-		if item != nil {
-			return item, nil
-		}
-	}
-
-	return nil, fmt.Errorf("failed to parse video item")
 }
 
-func (parser *nineOneParser) parseVideoList(fileName string) (*VideoItem, error) {
-	info, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		return nil, err
-	}
-
-	doc, err := html.Parse(strings.NewReader(string(info)))
-	if err != nil {
-		return nil, err
-	}
-
-	return parser.parseVideoItem(doc)
-}
-
-func (parser *nineOneParser) htmlDOMTraverse(node *html.Node,
-	visitor func(node *html.Node, data interface{}) bool, data interface{}) {
-	visitor(node, data)
-	for c := node.FirstChild; c != nil; c = c.NextSibling {
-		parser.htmlDOMTraverse(c, visitor, data)
-	}
-}
-
-func (parser *nineOneParser) detailedVideoItemVisitor(n *html.Node, data interface{}) bool {
+func (parser *nineOneParser) detailedVideoItemVisitor(n *html.Node, data interface{}) {
 	item := data.(*VideoItem)
 	if n.Type == html.ElementNode {
-		//var videoSrc, videoTitle, videoDuration, uploadTime, videoAuthor string
 
 		if n.Data == "source" {
 			// Parse video source
 			videoSrc, err := findAttrValueOfElementNode(n, "src")
 			if err != nil {
-				return false
+				return
 			}
 
-			// Extract video title from video source
-			start := strings.Index(videoSrc, "mp43")
-			start += len("mp43") + 1
-			stop := strings.Index(videoSrc, "?")
-			videoTitle := videoSrc[start:stop]
-
 			item.VideoSource = videoSrc
-			item.Title = videoTitle
 		} else if n.Data == "div" {
 			match, _ := isElementNodeHasAttrs(n, []*html.Attribute{
 				&html.Attribute{
@@ -436,7 +410,7 @@ func (parser *nineOneParser) detailedVideoItemVisitor(n *html.Node, data interfa
 				// Parse video duration
 				spanNode, err := findFirstChildOfElementNode(n, "span")
 				if err != nil {
-					return false
+					return
 				}
 
 				spanNode, err = findFirstChildOfElementNode(spanNode, "span")
@@ -492,24 +466,13 @@ func (parser *nineOneParser) detailedVideoItemVisitor(n *html.Node, data interfa
 			}
 		}
 
-		//sniffer := *parser.sniffer
-		//item, ok := sniffer.ds.get(viewkey)
-		//if ok {
-		//item.Title = videoTitle
-		//item.Author = videoAuthor
-		//item.VideoSource = videoSrc
-
-		//strings.Replace(videoDuration, ":", "m", 1)
-		//videoDuration += "s"
-		//item.VideoTime, _ = time.ParseDuration(videoDuration)
-
-		//const layout = "2016-12-12"
-		//item.UploadTime, _ = time.Parse(layout, uploadTime)
-
-		//}
+		// Video Source, Duration, Upload Time, Author
+		fmt.Println(item.VideoSource)
+		fmt.Println(item.VideoTime)
+		fmt.Println(item.UploadTime)
+		fmt.Println(item.Author)
+		fmt.Printf("\n")
 	}
-
-	return true
 }
 
 func (parser *nineOneParser) parseDetailedVideoItem(fileName string, viewkey string) {
@@ -523,8 +486,7 @@ func (parser *nineOneParser) parseDetailedVideoItem(fileName string, viewkey str
 		log.Fatal(err)
 	}
 
-	sniffer := *parser.sniffer
-	item, ok := sniffer.ds.get(viewkey)
+	item, ok := parser.sniffer.datasetGet(viewkey)
 	if ok {
 		parser.htmlDOMTraverse(doc, parser.detailedVideoItemVisitor, item)
 	}
@@ -550,13 +512,15 @@ func (parser *nineOneParser) refreshDataset() (int, error) {
 	for _, file := range files {
 		if !file.IsDir() {
 			fullpath := dirname + "/" + file.Name()
-			fmt.Println("process file - ", fullpath)
-			item, err := parser.parseVideoList(fullpath)
+			//fmt.Println("process file - ", fullpath)
+			items, err := parser.parseVideoList(fullpath)
 			if err != nil {
 				return 0, err
 			}
-			//dataset.add(item.ViewKey, item)
-			parser.sniffer.datasetAppend(item.ViewKey, item)
+			for _, item := range items {
+				fmt.Println(item.Title)
+				parser.sniffer.datasetAppend(item.ViewKey, item)
+			}
 		}
 	}
 
@@ -612,15 +576,20 @@ func (parser *nineOneParser) scriptGenerate() (int, error) {
 	return len(files), nil
 }
 
-func (parser *nineOneParser) peekDataset() {
+func (parser *nineOneParser) persistDataset() {
+	db, _ := sql.Open("sqlite3", "nineone.db")
+	defer db.Close()
+
 	//sniffer := *parser.sniffer
 	parser.sniffer.datasetIterate(func(item *VideoItem) bool {
-		fmt.Printf("%s %s %s\n", item.Title, item.Author, item.VideoSource)
+		fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
+		videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL)
 		return true
 	})
 }
 
-func (parser *nineOneParser) samplePageGenerate() {
+func (parser *nineOneParser) refreshDataset2() {
+	const dirname = "tmp/data/detail"
 	//files, err := ioutil.ReadDir(dir)
 	//if err != nil {
 	//	log.Fatal(err)
@@ -634,8 +603,8 @@ func (parser *nineOneParser) samplePageGenerate() {
 
 	//fmt.Println(len(dataset))
 
-	fmt.Println("<head><title>Results</title></head>")
-	fmt.Println("<body>")
+	//fmt.Println("<head><title>Results</title></head>")
+	//fmt.Println("<body>")
 
 	//for _, dataItem := range dataset {
 	//	fmt.Println("<p>")
@@ -643,7 +612,7 @@ func (parser *nineOneParser) samplePageGenerate() {
 	//	fmt.Println("</p>")
 	//}
 
-	fmt.Println("</body>")
+	//fmt.Println("</body>")
 }
 
 func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, error) {
@@ -699,7 +668,6 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 		req.Header.Set("User-Agent", fetcher.userAgent)
 		req.Header.Add("Accept-Encoding", "gzip")
 
-		//client := &http.Client{}
 		client := new(http.Client)
 		resp, err = client.Do(req)
 
@@ -809,4 +777,17 @@ func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 			break
 		}
 	}
+}
+
+func videoListTableInsert(db *sql.DB, viewkey string, url string) {
+
+	defer db.Close()
+
+	tx, _ := db.Begin()
+	stmt, _ := tx.Prepare("insert into VideoListTable (viewkey, url) values (?,?)")
+	_, err := stmt.Exec(viewkey, url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tx.Commit()
 }
