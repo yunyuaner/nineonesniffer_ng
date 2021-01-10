@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -281,12 +282,16 @@ func (parser *nineOneParser) parseVideoList(fileName string) (items []*VideoItem
 		return nil, err
 	}
 
-	parser.htmlDOMTraverse(doc, parser.videoListVisitor, items)
+	/**
+	 * should use pointer to slice *[]*VideoItem
+	 * https://stackoverflow.com/questions/39993688/are-golang-slices-passed-by-value
+	 */
+	parser.htmlDOMTraverse(doc, parser.videoListVisitor, &items)
 	return items, nil
 }
 
 func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
-	items := data.([]*VideoItem)
+	items := data.(*[]*VideoItem)
 
 	if n.Type == html.ElementNode && n.Data == "a" {
 		var videoDetailedPageURL, imgSource string
@@ -380,7 +385,8 @@ func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
 			//fmt.Println(viewkey)
 			//fmt.Printf("\n")
 
-			items = append(items, item)
+			*items = append(*items, item)
+			//fmt.Printf("visitor, items - %d\n", len(items))
 		}
 
 	}
@@ -493,7 +499,7 @@ func (parser *nineOneParser) parseDetailedVideoItem(fileName string, viewkey str
 }
 
 func (parser *nineOneParser) refreshDataset() (int, error) {
-	const dirname = "tmp/data/list"
+	const dirname = "data/list/base"
 	//sniffer := *parser.sniffer
 	//dataset := &sniffer.ds
 
@@ -509,22 +515,33 @@ func (parser *nineOneParser) refreshDataset() (int, error) {
 		return 0, err
 	}
 
+	var allFiles []string
+
 	for _, file := range files {
 		if !file.IsDir() {
 			fullpath := dirname + "/" + file.Name()
-			//fmt.Println("process file - ", fullpath)
-			items, err := parser.parseVideoList(fullpath)
-			if err != nil {
-				return 0, err
-			}
-			for _, item := range items {
-				fmt.Println(item.Title)
+			allFiles = append(allFiles, fullpath)
+		}
+	}
+
+	sort.Strings(allFiles)
+
+	for _, file := range allFiles {
+		fmt.Println("process file - ", file)
+		items, err := parser.parseVideoList(file)
+		//fmt.Printf("items - %d\n", len(items))
+		if err != nil {
+			return 0, err
+		}
+		for _, item := range items {
+			//fmt.Println(item.Title)
+			if !parser.sniffer.datasetHas(item.ViewKey) {
 				parser.sniffer.datasetAppend(item.ViewKey, item)
 			}
 		}
 	}
 
-	return len(files), nil
+	return len(allFiles), nil
 }
 
 func (parser *nineOneParser) scriptGenerate() (int, error) {
@@ -577,15 +594,27 @@ func (parser *nineOneParser) scriptGenerate() (int, error) {
 }
 
 func (parser *nineOneParser) persistDataset() {
-	db, _ := sql.Open("sqlite3", "nineone.db")
+	db, err := sql.Open("sqlite3", "nineone.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	defer db.Close()
 
 	//sniffer := *parser.sniffer
 	parser.sniffer.datasetIterate(func(item *VideoItem) bool {
 		fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
-		videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL)
+		//videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL)
+		videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL, item.Title, item.Thumbnail.ImgSource, item.Thumbnail.ImgID)
 		return true
 	})
+
+	tx.Commit()
 }
 
 func (parser *nineOneParser) refreshDataset2() {
@@ -717,7 +746,7 @@ func (fetcher *nineOneFetcher) fetchVideoList() error {
 
 		info, err := fetcher.fetchPage(url)
 
-		fileName := fmt.Sprintf("tmp/data/list/%04d.html", i+1)
+		fileName := fmt.Sprintf("data/list/%04d.html", i+1)
 
 		err = ioutil.WriteFile(fileName, info, 0644)
 		if err != nil {
@@ -779,15 +808,20 @@ func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 	}
 }
 
-func videoListTableInsert(db *sql.DB, viewkey string, url string) {
-
-	defer db.Close()
-
+func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, thumbnail string, thumbnailID int) {
+	/* for sql statement, check https://stackoverflow.com/questions/40157049/sqlite-case-statement-insert-if-not-exists */
+	//sql := `insert into VideoListTable(viewkey, url)
+	//			select viewkey, url
+	//			from (select ? as vk, ? as url) t
+	//			where not exists (select 1 from VideoListTable where VideoListTable.viewkey = t.vk)`
+	//fmt.Println(sql)
 	tx, _ := db.Begin()
-	stmt, _ := tx.Prepare("insert into VideoListTable (viewkey, url) values (?,?)")
-	_, err := stmt.Exec(viewkey, url)
+	stmt, _ := tx.Prepare("insert into VideoListTable (title, viewkey, url, thumbnail, thumbnail_id, date) values (?,?,?,?,?,?)")
+	//stmt, _ := tx.Prepare(sql)
+	_, err := stmt.Exec(title, viewkey, url, thumbnail, thumbnailID, time.Now().Format("2006-01-02 15:04:05"))
 	if err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		tx.Rollback()
 	}
 	tx.Commit()
 }

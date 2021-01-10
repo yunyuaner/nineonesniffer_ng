@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 
-	nineonesniffer "github.com/yatge.com/nineonesniffer_ng"
+	nineonesniffer "github.com/yunyuaner/nineonesniffer_ng"
 )
 
 var sniffer *nineonesniffer.NineOneSniffer
