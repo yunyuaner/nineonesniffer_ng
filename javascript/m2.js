@@ -106,66 +106,79 @@ var obj0 = function(obj0_param0, obj0_param1) {
     return an_item;
 };
 
-function strencode2(_0x4f0d7a) {
-    var _0x4c6de5 = {
-        'Anfny': function _0x4f6a21(_0x51d0ce, _0x5a5f36) {
-            return _0x51d0ce(_0x5a5f36);
+function strencode2(encrypted_text) {
+    var func_map0 = {
+        'Anfny': function _f(_f_p1, _f_p2) {
+            return _f_p1(_f_p2);
         }
     };
-    return _0x4c6de5[obj0('0x0', 'fo#E')](unescape, _0x4f0d7a);
+    return func_map0[obj0('0x0', 'fo#E')](unescape, encrypted_text);
 }
 
-;(function(_0x17883e, _0x4a42d3, a_str) {
+;(function(__p1, __p2, a_str) {
     var a_map = {
-        'lPNHL': function _0x1c947e(_0x4d57b6, _0x51f6a5) {
-            return _0x4d57b6 !== _0x51f6a5;
+        'lPNHL': function func_not_equal(_a, _b) {
+            return _a !== _b;
         },
-        'EPdUx': function _0x55f4cc(_0x34b7bc, _0x9f930c) {
-            return _0x34b7bc === _0x9f930c;
+
+        'EPdUx': function func_equal(_a, _b) {
+            return _a === _b;
         },
+
         'kjFfJ': 'jsjiami.com.v5',
-        'DFsBH': function _0x5f08ac(_0x1e6fa1, _0x4c0aef) {
-            return _0x1e6fa1 + _0x4c0aef;
+
+        'DFsBH': function func_add(_a, _b) {
+            return _a + _b;
         },
+
         'akiuH': obj0('0x1', 'KYjt'),
-        'VtfeI': function _0x4f3b7b(_0x572344, _0x5f0cde) {
-            return _0x572344(_0x5f0cde);
+
+        'VtfeI': function func_call(_a, _b) {
+            return _a(_b);
         },
+
         'Deqmq': obj0('0x2', 'oYRG'),
+
         'oKQDc': obj0('0x3', 'i^vo'),
+
         'UMyIE': obj0('0x4', 'oYRG'),
-        'lRwKx': function _0x5b71b4(_0x163a75, _0x4d3998) {
-            return _0x163a75 === _0x4d3998;
+
+        'lRwKx': function func_equal_1(_a, _b) {
+            return _a === _b;
         },
-        'TOBCR': function _0x314af8(_0x3e6efe, _0x275766) {
-            return _0x3e6efe + _0x275766;
+
+        'TOBCR': function func_add_1(_a, _b) {
+            return _a + _b;
         },
+
         'AUOVd': obj0('0x5', 'lALy')
     };
+
     a_str = 'al';
+
     try {
         if ('EqF' !== obj0('0x6', 'xSW]')) {
             a_str += obj0('0x7', 'oYRG');
-            _0x4a42d3 = encode_version;
-            if (!(a_map[obj0('0x8', 'fo#E')](typeof _0x4a42d3, obj0('0x9', '*oMH')) && a_map[obj0('0xa', 'ov6D')](_0x4a42d3, a_map[obj0('0xb', '3k]D')]))) {
-                _0x17883e[a_str](a_map[obj0('0xc', '@&#[')]('ɾ��', a_map[obj0('0xd', 'i^vo')]));
+            __p2 = encode_version;
+            if (!(a_map[obj0('0x8', 'fo#E')](typeof __p2, obj0('0x9', '*oMH')) && a_map[obj0('0xa', 'ov6D')](__p2, a_map[obj0('0xb', '3k]D')]))) {
+                __p1[a_str](a_map[obj0('0xc', '@&#[')]('ɾ��', a_map[obj0('0xd', 'i^vo')]));
             }
         } else {
             return a_map[obj0('0xe', 'rvlM')](unescape, input);
         }
     } catch (_0x23e6c5) {
         if ('svo' !== a_map[obj0('0xf', 'TpCD')]) {
-            _0x17883e[a_str]('ɾ���汾�ţ�js�ᶨ�ڵ���');
+            __p1[a_str]('ɾ���汾�ţ�js�ᶨ�ڵ���');
         } else {
             a_str = 'al';
             try {
                 a_str += a_map[obj0('0x10', 'doK*')];
-                _0x4a42d3 = encode_version;
-                if (!(a_map[obj0('0x11', 'ZRZ4')](typeof _0x4a42d3, a_map['UMyIE']) && a_map[obj0('0x12', '@&#[')](_0x4a42d3, a_map['kjFfJ']))) {
-                    _0x17883e[a_str](a_map[obj0('0x13', 'KYjt')]('ɾ��', obj0('0x14', 'xSW]')));
+                __p2 = encode_version;
+                if (!(a_map[obj0('0x11', 'ZRZ4')](typeof __p2, a_map['UMyIE']) && a_map[obj0('0x12', '@&#[')](__p2, a_map['kjFfJ']))) {
+                    __p1[a_str](a_map[obj0('0x13', 'KYjt')]('ɾ��', obj0('0x14', 'xSW]')));
                 }
             } catch (_0x4202f6) {
-                _0x17883e[a_str](a_map[obj0('0x15', 'oYRG')]);
+                __p1[a_str](a_map[obj0('0x15', 'oYRG')]);
             }
         }
     }
