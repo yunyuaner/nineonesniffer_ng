@@ -133,8 +133,12 @@ func (sniffer *NineOneSniffer) Fetch() {
 
 func (sniffer *NineOneSniffer) RefreshDataset() {
 	sniffer.parser.refreshDataset()
-	fmt.Printf("Got %d items\n", len(sniffer.ds))
-	sniffer.parser.persistDataset()
+	fmt.Printf("Got %d items\n", sniffer.datasetSize())
+	sniffer.parser.datasetPersist()
+}
+
+func (sniffer *NineOneSniffer) Load() {
+	sniffer.parser.datasetLoad()
 }
 
 func (sniffer *NineOneSniffer) datasetAppend(key string, item *VideoItem) *VideoItem {
@@ -168,6 +172,10 @@ func (sniffer *NineOneSniffer) datasetIterate(visitor func(item *VideoItem) bool
 			return
 		}
 	}
+}
+
+func (sniffer *NineOneSniffer) datasetSize() int {
+	return len(sniffer.ds)
 }
 
 func findFirstChildOfElementNode(node *html.Node, tagName string) (*html.Node, error) {
@@ -593,7 +601,7 @@ func (parser *nineOneParser) scriptGenerate() (int, error) {
 	return len(files), nil
 }
 
-func (parser *nineOneParser) persistDataset() {
+func (parser *nineOneParser) datasetPersist() {
 	db, err := sql.Open("sqlite3", "nineone.db")
 	if err != nil {
 		log.Fatal(err)
@@ -617,31 +625,35 @@ func (parser *nineOneParser) persistDataset() {
 	tx.Commit()
 }
 
-func (parser *nineOneParser) refreshDataset2() {
-	const dirname = "tmp/data/detail"
-	//files, err := ioutil.ReadDir(dir)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
+func (parser *nineOneParser) datasetLoad() {
+	db, err := sql.Open("sqlite3", "nineone.db")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	//for _, f := range files {
-	//fileName := dir + "/" + f.Name()
-	//fmt.Printf("parse - %s\n", fileName)
-	//parser.parseDetailedVideoItem(fileName)
-	//}
+	defer db.Close()
 
-	//fmt.Println(len(dataset))
+	rows, err := db.Query("select title, viewkey, url, thumbnail, thumbnail_id from VideoListTable")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	//fmt.Println("<head><title>Results</title></head>")
-	//fmt.Println("<body>")
+	count := 0
 
-	//for _, dataItem := range dataset {
-	//	fmt.Println("<p>")
-	//	fmt.Printf("<a href='%s' target='blank'>%s</a>\n", dataItem.src, dataItem.name)
-	//	fmt.Println("</p>")
-	//}
+	for rows.Next() {
+		var item VideoItem
+		err = rows.Scan(&item.Title, &item.ViewKey, &item.VideoDetailedPageURL, &item.Thumbnail.ImgSource, &item.Thumbnail.ImgID)
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+		parser.sniffer.datasetAppend(item.ViewKey, &item)
 
-	//fmt.Println("</body>")
+		count++
+		fmt.Printf("\r%06d item added", count)
+	}
+
+	fmt.Printf("\rGot %d items \n", parser.sniffer.datasetSize())
 }
 
 func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, error) {

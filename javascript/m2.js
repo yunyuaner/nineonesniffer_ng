@@ -166,7 +166,7 @@ function strencode2(encrypted_text) {
         } else {
             return a_map[obj0('0xe', 'rvlM')](unescape, input);
         }
-    } catch (_0x23e6c5) {
+    } catch (exception) {
         if ('svo' !== a_map[obj0('0xf', 'TpCD')]) {
             __p1[a_str]('ɾ���汾�ţ�js�ᶨ�ڵ���');
         } else {

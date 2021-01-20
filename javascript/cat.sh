@@ -1,9 +1,16 @@
 #!/bin/bash
 
-cmd="cat"
-for ((i = 0; i <= 60; i++)); do
-    cmd="${cmd} 424080${i}.ts "
-done
-cmd="${cmd} > 424080.ts"
+video_id="426749"
+video_parts_count=74
+video_parts_dir="`pwd`/video_parts"
+video_merged_dir="`pwd`/video_merged"
 
-echo $cmd
+cmd="cat"
+for ((i = 0; i <= ${video_parts_count}; i++)); do
+    cmd="${cmd} ${video_parts_dir}/${video_id}${i}.ts "
+done
+cmd="${cmd} > ${video_merged_dir}/${video_id}.ts"
+
+eval $cmd
+
+ffmpeg -i ${video_merged_dir}/${video_id}.ts -c:v libx264 -c:a aac -strict -2 ${video_merged_dir}/${video_id}.mp4
