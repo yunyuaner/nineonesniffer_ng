@@ -1,7 +1,9 @@
 #!/bin/bash
 
-video_id="426749"
-video_parts_count=74
+#video_id="423117"
+#video_parts_count=49
+video_id=$1
+video_parts_count=$2
 video_parts_dir="`pwd`/video_parts"
 video_merged_dir="`pwd`/video_merged"
 
