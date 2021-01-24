@@ -9,7 +9,7 @@ video_merged_dir="`pwd`/video_merged"
 
 cmd="cat"
 for ((i = 0; i <= ${video_parts_count}; i++)); do
-    cmd="${cmd} ${video_parts_dir}/${video_id}${i}.ts "
+    cmd="${cmd} ${video_parts_dir}/${video_id}/${video_id}${i}.ts "
 done
 cmd="${cmd} > ${video_merged_dir}/${video_id}.ts"
 

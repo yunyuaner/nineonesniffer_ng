@@ -12,16 +12,43 @@ import (
 	"strconv"
 )
 
-var filename string
+//var filename string
 var auto bool
 
 func init() {
-	flag.StringVar(&filename, "file", "", "m3u8 file name to parse")
+	//	flag.StringVar(&filename, "file", "", "m3u8 file name to parse")
 	flag.BoolVar(&auto, "auto", false, "download video parts, merge and transcode automatically")
 }
 
+const (
+	dir     = "./m3u8/todo"
+	doneDir = "./m3u8/done"
+)
+
 func main() {
 	flag.Parse()
+
+	f, err := os.Open(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fileInfo, _ := f.Readdir(0)
+	for _, info := range fileInfo {
+		if !info.IsDir() {
+			fmt.Printf("analyze and download file - %s\n", info.Name())
+			proceed(dir + "/" + info.Name())
+			if auto {
+				cmd := exec.Command("mv", "-f", dir+"/"+info.Name(), doneDir+"/"+info.Name())
+				if err = cmd.Run(); err != nil {
+					fmt.Println(err)
+				}
+			}
+		}
+	}
+}
+
+func proceed(filename string) {
 	file, err := os.Open(filename)
 	if os.IsNotExist(err) {
 		log.Fatal(err)
@@ -46,7 +73,7 @@ func main() {
 	finalFileName := strconv.Itoa(videoPartsWithoutSuffix[0] / 10)
 	filePartsCount := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1] % 100)
 
-	fmt.Printf("final file name - %s, file parts count - %s\n", finalFileName, filePartsCount)
+	//fmt.Printf("final file name - %s, file parts count - %s\n", finalFileName, filePartsCount)
 	if auto {
 		cmd := exec.Command("./get.sh", finalFileName, filePartsCount)
 		cmd.Stdout = os.Stdout
