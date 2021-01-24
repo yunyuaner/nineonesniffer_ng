@@ -131,8 +131,8 @@ func (sniffer *NineOneSniffer) Init() {
 	sniffer.ds = make(map[string]*VideoItem)
 }
 
-func (sniffer *NineOneSniffer) Prefetch() {
-	sniffer.fetcher.fetchVideoList()
+func (sniffer *NineOneSniffer) Prefetch(count int) {
+	sniffer.fetcher.fetchVideoList(count)
 }
 
 func (sniffer *NineOneSniffer) Fetch() {
@@ -789,7 +789,7 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 	return body, nil
 }
 
-func (fetcher *nineOneFetcher) fetchVideoList() error {
+func (fetcher *nineOneFetcher) fetchVideoList(count int) error {
 	var url string
 
 	if _, err := os.Stat(cookieFile); os.IsNotExist(err) {
@@ -801,7 +801,7 @@ func (fetcher *nineOneFetcher) fetchVideoList() error {
 		return err
 	}
 
-	for i := start; i < 10; i++ {
+	for i := start; i < count; i++ {
 		url = fmt.Sprintf(baseurl+"%d", i+1)
 		fmt.Printf("fetch - %s\n", url)
 
@@ -907,9 +907,11 @@ func (fether *nineOneFetcher) fetchVideoPartsAndMerge() {
 	fileInfo, _ := f.Readdir(0)
 	for _, info := range fileInfo {
 		if !info.IsDir() {
+			descriptorName := info.Name()
+			baseName := descriptorName[:len(descriptorName)-len(".m3u8")]
 			fmt.Printf("analyze and download file - %s\n", info.Name())
 
-			func(filename string) {
+			func(filename string, videoPartsBaseName string) {
 				utilsGetScript := utilsDir + "/get.sh"
 				utilsCatScript := utilsDir + "/cat.sh"
 
@@ -932,8 +934,10 @@ func (fether *nineOneFetcher) fetchVideoPartsAndMerge() {
 				}
 
 				sort.Ints(videoPartsWithoutSuffix)
-				finalFileName := strconv.Itoa(videoPartsWithoutSuffix[0] / 10)
-				filePartsCount := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1] % 100)
+				finalFileName := videoPartsBaseName
+				lastVideoPartName := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1])
+				n := strings.Index(lastVideoPartName, finalFileName)
+				filePartsCount := lastVideoPartName[n+len(finalFileName):]
 
 				cmd := exec.Command(utilsGetScript, finalFileName, filePartsCount)
 				cmd.Stdout = os.Stdout
@@ -950,7 +954,7 @@ func (fether *nineOneFetcher) fetchVideoPartsAndMerge() {
 				if err != nil {
 					log.Fatal(err)
 				}
-			}(videoPartsDescTodoDir + "/" + info.Name())
+			}(videoPartsDescTodoDir+"/"+descriptorName, baseName)
 
 			cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
 			if err = cmd.Run(); err != nil {
