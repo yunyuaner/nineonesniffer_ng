@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#video_id="423117"
-#video_parts_count=49
+source "`pwd`/../utils/path.sh"
+
 video_id=$1
 video_parts_count=$2
-video_parts_dir="`pwd`/video_parts"
-video_merged_dir="`pwd`/video_merged"
+#video_parts_dir="`pwd`/video_parts"
+#video_merged_dir="`pwd`/video_merged"
 
 cmd="cat"
 for ((i = 0; i <= ${video_parts_count}; i++)); do

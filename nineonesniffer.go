@@ -2,6 +2,7 @@ package nineonesniffer
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"database/sql"
 	"errors"
@@ -11,6 +12,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +37,11 @@ const (
 	start                  = 0
 	videoListDatabase      = "video_list_by_viewkey.txt"
 	cookieFile             = "cookies.txt"
+	videoPartsDir          = "data/video/video_parts"
+	videoMergedDir         = "data/video/video_merged"
+	videoPartsDescTodoDir  = "data/video/m3u8/todo"
+	videoPartsDescDoneDir  = "data/video/m3u8/done"
+	utilsDir               = "../utils"
 )
 
 type ImageItem struct {
@@ -129,6 +137,14 @@ func (sniffer *NineOneSniffer) Prefetch() {
 
 func (sniffer *NineOneSniffer) Fetch() {
 	sniffer.fetcher.fetchDetailedVideoPages()
+}
+
+func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string) {
+	sniffer.fetcher.fetchVideoPartsDescriptor(url)
+}
+
+func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge() {
+	sniffer.fetcher.fetchVideoPartsAndMerge()
 }
 
 func (sniffer *NineOneSniffer) RefreshDataset() {
@@ -656,6 +672,39 @@ func (parser *nineOneParser) datasetLoad() {
 	fmt.Printf("\rGot %d items \n", parser.sniffer.datasetSize())
 }
 
+func (parser *nineOneParser) decode(infoStr string) (*string, *string) {
+	start := strings.Index(infoStr, "\"") + 1
+	end := strings.LastIndex(infoStr, "\"")
+
+	escapedSrc := infoStr[start:end]
+
+	var b bytes.Buffer
+
+	for where := 0; where < len(escapedSrc); where += 3 {
+		n := strings.Index(escapedSrc[where:], "%")
+		val := escapedSrc[where+n+1 : where+n+3]
+		integerCh, _ := strconv.ParseInt(val, 16, 32)
+		b.WriteByte(byte(integerCh))
+	}
+
+	unescaped := b.String()
+	start = strings.Index(unescaped, "src='") + len("src='")
+	end = strings.Index(unescaped[start:], "'")
+	srcWithParams := unescaped[start : start+end]
+	questionMarkPos := strings.Index(srcWithParams, "?")
+	httpGetSrc := srcWithParams[:questionMarkPos]
+	slash := strings.LastIndex(httpGetSrc, "/")
+	name := httpGetSrc[slash+1:]
+
+	return &name, &srcWithParams
+}
+
+func (parser *nineOneParser) extract(fileContent string) (*string, error) {
+	r := regexp.MustCompile(`document.write\(strencode2\(.*\)\);`)
+	info := r.FindString(string(fileContent))
+	return &info, nil
+}
+
 func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, error) {
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		return nil, err
@@ -816,6 +865,97 @@ func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 
 		if count++; count >= 100 {
 			break
+		}
+	}
+}
+
+func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
+	if len(url) == 0 {
+		return fmt.Errorf("url shouldn't be empty")
+	}
+
+	content, err := fetcher.fetchPage(url)
+	if err != nil {
+		return err
+	}
+
+	sniffer := *fetcher.sniffer
+	parser := sniffer.parser
+
+	info, err := parser.extract(string(content))
+	if err != nil {
+		return err
+	}
+
+	name, src := sniffer.parser.decode(*info)
+	cmd := exec.Command("wget", "-O", videoPartsDescTodoDir+"/"+*name, *src)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (fether *nineOneFetcher) fetchVideoPartsAndMerge() {
+	f, err := os.Open(videoPartsDescTodoDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fileInfo, _ := f.Readdir(0)
+	for _, info := range fileInfo {
+		if !info.IsDir() {
+			fmt.Printf("analyze and download file - %s\n", info.Name())
+
+			func(filename string) {
+				utilsGetScript := utilsDir + "/get.sh"
+				utilsCatScript := utilsDir + "/cat.sh"
+
+				file, err := os.Open(filename)
+				if os.IsNotExist(err) {
+					log.Fatal(err)
+				}
+
+				defer file.Close()
+
+				fileContent, _ := ioutil.ReadAll(file)
+				fileContentStr := string(fileContent)
+
+				r := regexp.MustCompile(`[0-9]*\.ts`)
+				videoParts := r.FindAllString(fileContentStr, -1)
+				var videoPartsWithoutSuffix []int
+				for _, part := range videoParts {
+					val, _ := strconv.Atoi(part[:len(part)-3])
+					videoPartsWithoutSuffix = append(videoPartsWithoutSuffix, val)
+				}
+
+				sort.Ints(videoPartsWithoutSuffix)
+				finalFileName := strconv.Itoa(videoPartsWithoutSuffix[0] / 10)
+				filePartsCount := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1] % 100)
+
+				cmd := exec.Command(utilsGetScript, finalFileName, filePartsCount)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				cmd = exec.Command(utilsCatScript, finalFileName, filePartsCount)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				if err != nil {
+					log.Fatal(err)
+				}
+			}(videoPartsDescTodoDir + "/" + info.Name())
+
+			cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
+			if err = cmd.Run(); err != nil {
+				fmt.Println(err)
+			}
 		}
 	}
 }
