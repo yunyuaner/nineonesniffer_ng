@@ -131,8 +131,8 @@ func (sniffer *NineOneSniffer) Init() {
 	sniffer.ds = make(map[string]*VideoItem)
 }
 
-func (sniffer *NineOneSniffer) Prefetch(count int) {
-	sniffer.fetcher.fetchVideoList(count)
+func (sniffer *NineOneSniffer) Prefetch(count int) (string, error) {
+	return sniffer.fetcher.fetchVideoList(count)
 }
 
 func (sniffer *NineOneSniffer) Fetch() {
@@ -147,9 +147,13 @@ func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge() {
 	sniffer.fetcher.fetchVideoPartsAndMerge()
 }
 
-func (sniffer *NineOneSniffer) RefreshDataset() {
-	sniffer.parser.refreshDataset()
+func (sniffer *NineOneSniffer) RefreshDataset(dirname string) {
+	sniffer.parser.refreshDataset(dirname)
 	fmt.Printf("Got %d items\n", sniffer.datasetSize())
+	//sniffer.parser.datasetPersist()
+}
+
+func (sniffer *NineOneSniffer) Persist() {
 	sniffer.parser.datasetPersist()
 }
 
@@ -402,7 +406,6 @@ func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
 			}
 
 			//fmt.Println(title)
-			//fmt.Println(videoSource)
 			//fmt.Println(imgSource)
 			//fmt.Println(imgName)
 			//fmt.Println(imgID)
@@ -522,8 +525,8 @@ func (parser *nineOneParser) parseDetailedVideoItem(fileName string, viewkey str
 	}
 }
 
-func (parser *nineOneParser) refreshDataset() (int, error) {
-	const dirname = "data/list/base"
+func (parser *nineOneParser) refreshDataset(dirname string) (int, error) {
+	//const dirname = "data/list/base"
 	//sniffer := *parser.sniffer
 	//dataset := &sniffer.ds
 
@@ -551,7 +554,7 @@ func (parser *nineOneParser) refreshDataset() (int, error) {
 	sort.Strings(allFiles)
 
 	for _, file := range allFiles {
-		fmt.Println("process file - ", file)
+		//fmt.Println("process file - ", file)
 		items, err := parser.parseVideoList(file)
 		//fmt.Printf("items - %d\n", len(items))
 		if err != nil {
@@ -789,7 +792,7 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 	return body, nil
 }
 
-func (fetcher *nineOneFetcher) fetchVideoList(count int) error {
+func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 	var url string
 
 	if _, err := os.Stat(cookieFile); os.IsNotExist(err) {
@@ -798,7 +801,14 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) error {
 
 	_, err := fetcher.parseCookies(cookieFile)
 	if err != nil {
-		return err
+		return "", err
+	}
+
+	now := time.Now()
+	dir := "data/list/" + now.Format("2006-01-02")
+	cmd := exec.Command("mkdir", "-p", dir)
+	if err = cmd.Run(); err != nil {
+		return "", err
 	}
 
 	for i := start; i < count; i++ {
@@ -807,15 +817,15 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) error {
 
 		info, err := fetcher.fetchPage(url)
 
-		fileName := fmt.Sprintf("data/list/%04d.html", i+1)
+		fileName := fmt.Sprintf(dir+"/%04d.html", i+1)
 
 		err = ioutil.WriteFile(fileName, info, 0644)
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 
-	return nil
+	return dir, nil
 }
 
 func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {

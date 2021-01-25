@@ -2,34 +2,72 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"log"
+	"os"
 
 	nineonesniffer "github.com/yunyuaner/nineonesniffer_ng"
 )
 
+var mode string
+var url string
+var count int
+var dir string
+var persist bool
+
 var sniffer *nineonesniffer.NineOneSniffer
 
 func init() {
+	flag.StringVar(&mode, "mode", "", "prefetch|fetch|refresh|load|dl_desc|dl_video")
+	flag.IntVar(&count, "count", 10, "Fetch newest video list count")
+	flag.StringVar(&url, "url", "", "url of the detailed video page")
+	flag.StringVar(&dir, "dir", "", "Target directory")
+	flag.BoolVar(&persist, "persist", false, "Persit infomation into database")
+
 	sniffer = new(nineonesniffer.NineOneSniffer)
 	sniffer.Init()
 }
 
 func main() {
-	prefetch := flag.Bool("prefetch", false, "Fetch newest video list")
-	fetch := flag.Bool("fetch", false, "Fetch newest detailed video items")
-	refresh := flag.Bool("refresh", false, "Refresh dataset")
-	load := flag.Bool("load", false, "Load data from disk")
 
 	flag.Parse()
 
-	if *prefetch {
-		sniffer.Prefetch()
-	} else if *fetch {
+	switch mode {
+	case "prefetch":
+		dirname, err := sniffer.Prefetch(count)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Prefetched pages stored in %s\n", dirname)
+
+	case "parse":
+		if len(dir) == 0 {
+			flag.PrintDefaults()
+			os.Exit(0)
+		}
+		sniffer.RefreshDataset(dir)
+
+		if persist {
+			sniffer.Persist()
+		}
+
+	case "fetch":
 		sniffer.Fetch()
-	} else if *refresh {
-		sniffer.RefreshDataset()
-	} else if *load {
+
+	case "load":
 		sniffer.Load()
-	} else {
+
+	case "dl_desc":
+		if len(url) == 0 {
+			flag.PrintDefaults()
+			os.Exit(0)
+		}
+		sniffer.FetchVideoPartsDscriptor(url)
+
+	case "dl_video":
+		sniffer.FetchVideoPartsAndMerge()
+
+	default:
 		flag.PrintDefaults()
 	}
 }
