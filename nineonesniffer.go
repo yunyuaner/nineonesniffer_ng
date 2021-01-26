@@ -140,12 +140,18 @@ func (sniffer *NineOneSniffer) Fetch() {
 	sniffer.fetcher.fetchDetailedVideoPages()
 }
 
+func (sniffer *NineOneSniffer) FetchThumbnails() {
+	sniffer.fetcher.fetchThumbnails()
+}
+
 func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string) {
 	sniffer.fetcher.fetchVideoPartsDescriptor(url)
 }
 
 func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge() {
-	sniffer.fetcher.fetchVideoPartsAndMerge()
+	if err := sniffer.fetcher.fetchVideoPartsAndMerge(); err != nil {
+		fmt.Println(err)
+	}
 }
 
 func (sniffer *NineOneSniffer) RefreshDataset(dirname string) {
@@ -667,10 +673,11 @@ func (parser *nineOneParser) datasetLoad() {
 			log.Print(err)
 			continue
 		}
+		item.Thumbnail.ImgName = fmt.Sprintf("%d.jpg", item.Thumbnail.ImgID)
 		parser.sniffer.datasetAppend(item.ViewKey, &item)
 
 		count++
-		fmt.Printf("\r%06d item added", count)
+		fmt.Printf("\r%6d item added", count)
 	}
 
 	fmt.Printf("\rGot %d items \n", parser.sniffer.datasetSize())
@@ -761,7 +768,11 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, error) 
 		TLSClientConfig:    cfg,
 	}
 
-	client := &http.Client{Transport: tr}
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   120 * time.Second,
+	}
+
 	resp, err := client.Head(url)
 	if err != nil {
 		return -1, err
@@ -867,6 +878,42 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 	return dir, nil
 }
 
+func (fetcher *nineOneFetcher) fetchThumbnails() {
+	thumbnailDir := "data/images/base"
+	f, err := os.Open(thumbnailDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	thumbnailsInfo, err := f.Readdir(0)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	thumbnailsMap := make(map[string]bool)
+
+	for _, info := range thumbnailsInfo {
+		if !info.IsDir() {
+			//fmt.Println(info.Name())
+			thumbnailsMap[info.Name()] = true
+		}
+	}
+
+	var newThumbnailsCount int
+
+	fetcher.sniffer.datasetIterate(func(item *VideoItem) bool {
+		_, ok := thumbnailsMap[item.Thumbnail.ImgName]
+		if !ok {
+			//fmt.Printf("Got new thumbnail - %s\n", item.Thumbnail.ImgName)
+			newThumbnailsCount++
+		}
+		return true
+	})
+
+	fmt.Printf("Existing thumbnails count - %d\n", len(thumbnailsMap))
+	fmt.Printf("Newly got thumbnails count - %d\n", newThumbnailsCount)
+}
+
 func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 	f, err := os.Open("video_list_by_viewkey.txt")
 	if err != nil {
@@ -962,7 +1009,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 	return nil
 }
 
-func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoPartsBaseName string) error {
+func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoPartsBaseName string, reliable bool) error {
 	utilsGetScript := utilsDir + "/get.sh"
 	utilsCatScript := utilsDir + "/cat.sh"
 
@@ -978,8 +1025,8 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoParts
 
 	r := regexp.MustCompile(`[0-9]*\.ts`)
 	videoParts := r.FindAllString(fileContentStr, -1)
-	videoPartsLengthMap := make(map[int]int)
 	urlBase := "https://cdn.91p07.com//m3u8"
+	videoPartsLengthMap := make(map[int]int)
 
 	var videoPartsWithoutSuffix []int
 	for _, part := range videoParts {
@@ -996,16 +1043,20 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoParts
 	filePartsCountInteger, _ := strconv.Atoi(filePartsCount)
 
 	/* First, query each video parts file length from server */
-	for i := 0; i < filePartsCountInteger; i++ {
-		urlResource := fmt.Sprintf("%s/%s/%s%d.ts", urlBase, finalFileName, finalFileName, i)
-		len, err := fetcher.queryHttpResourceLength(urlResource)
-		if err != nil {
-			return err
+	if reliable {
+		for i := 0; i < filePartsCountInteger; i++ {
+			videoPartsNameWithExt := fmt.Sprintf("%s%d.ts", finalFileName, i)
+			urlResource := fmt.Sprintf("%s/%s/%s", urlBase, finalFileName, videoPartsNameWithExt)
+			len, err := fetcher.queryHttpResourceLength(urlResource)
+			if err != nil {
+				return err
+			}
+			key, _ := strconv.Atoi(fmt.Sprintf("%s%d", finalFileName, i))
+			videoPartsLengthMap[key] = len
 		}
-		key, _ := strconv.Atoi(fmt.Sprintf("%s%d", finalFileName, i))
-		videoPartsLengthMap[key] = len
 	}
 
+	/* Retrive the video parts one by one */
 	cmd := exec.Command(utilsGetScript, finalFileName, filePartsCount)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -1014,22 +1065,25 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoParts
 		return err
 	}
 
-	/* TODO: verify that all the video file parts are downloaded completely */
-	dirOfVideoParts := "data/video/video_parts/"
-	for k, v := range videoPartsLengthMap {
-		file := fmt.Sprintf("%s/%d.ts", dirOfVideoParts, k)
-		f, err := os.Open(file)
+	/* TODO: Verify that all the video file parts are downloaded completely */
+	if reliable {
+		dirOfVideoParts := "data/video/video_parts/"
+		for k, v := range videoPartsLengthMap {
+			videoPartName := fmt.Sprintf("%d.ts", k)
+			file := fmt.Sprintf("%s/%s", dirOfVideoParts, videoPartName)
+			fmt.Printf("check existence of video part - %s\n", videoPartName)
 
-		if os.IsNotExist(err) {
-			/* Should call download method again */
+			f, err := os.Open(file)
+			if os.IsNotExist(err) {
+				/* TODO: Should call download method again */
+				fmt.Println("Should call download method again")
+			} else if info, _ := f.Stat(); int(info.Size()) < v {
+				/* TODO: Should call download method again */
+				fmt.Println("Should call download method again")
+			}
+
+			f.Close()
 		}
-
-		info, _ := f.Stat()
-		if int(info.Size()) < v {
-			/* Should call download method again */
-		}
-
-		f.Close()
 	}
 
 	/* Merge all the downloaded video parts into one and do transcoding */
@@ -1057,7 +1111,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 			baseName := descriptorName[:len(descriptorName)-len(".m3u8")]
 			fmt.Printf("analyze and download file - %s\n", info.Name())
 
-			err := fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName)
+			err := fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName, false)
 
 			if err != nil {
 				return err

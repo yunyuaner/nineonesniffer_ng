@@ -14,15 +14,17 @@ var url string
 var count int
 var dir string
 var persist bool
+var thumbnail bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
 func init() {
-	flag.StringVar(&mode, "mode", "", "prefetch|fetch|refresh|load|dl_desc|dl_video")
+	flag.StringVar(&mode, "mode", "", "prefetch|fetch|parse|load|dl_desc|dl_video")
 	flag.IntVar(&count, "count", 10, "Fetch newest video list count")
 	flag.StringVar(&url, "url", "", "url of the detailed video page")
 	flag.StringVar(&dir, "dir", "", "Target directory")
 	flag.BoolVar(&persist, "persist", false, "Persit infomation into database")
+	flag.BoolVar(&thumbnail, "thumbnail", false, "See how many new thumbnails we newly got")
 
 	sniffer = new(nineonesniffer.NineOneSniffer)
 	sniffer.Init()
@@ -56,6 +58,9 @@ func main() {
 
 	case "load":
 		sniffer.Load()
+		if thumbnail {
+			sniffer.FetchThumbnails()
+		}
 
 	case "dl_desc":
 		if len(url) == 0 {
