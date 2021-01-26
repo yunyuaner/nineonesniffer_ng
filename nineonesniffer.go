@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/tls"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -740,6 +741,44 @@ func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, er
 	return fetcher.cookies, nil
 }
 
+func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, error) {
+	cfg := &tls.Config{
+		MinVersion:               tls.VersionTLS12,
+		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+		PreferServerCipherSuites: true,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+		},
+	}
+
+	tr := &http.Transport{
+		MaxIdleConns:       10,
+		IdleConnTimeout:    60 * time.Second,
+		DisableCompression: true,
+		TLSClientConfig:    cfg,
+	}
+
+	client := &http.Client{Transport: tr}
+	resp, err := client.Head(url)
+	if err != nil {
+		return -1, err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Println(resp.Status)
+		err = fmt.Errorf("http status code - %s\n", resp.StatusCode)
+		return -1, err
+	}
+
+	length, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+	return length, nil
+}
+
 func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 	var resp *http.Response
 	var reader io.ReadCloser
@@ -897,18 +936,115 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 		return err
 	}
 
+	length, err := fetcher.queryHttpResourceLength(url)
+	if err != nil {
+		return err
+	}
+
 	name, src := sniffer.parser.decode(*info)
-	cmd := exec.Command("wget", "-O", videoPartsDescTodoDir+"/"+*name, *src)
+	filename := videoPartsDescTodoDir + "/" + *name
+	cmd := exec.Command("wget", "-O", filename, *src)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return err
 	}
 
+	fileInfo, err := os.Stat(filename)
+	if err != nil {
+		return err
+	}
+
+	if int(fileInfo.Size()) < length {
+		return fmt.Errorf("incomplete descriptor")
+	}
+
 	return nil
 }
 
-func (fether *nineOneFetcher) fetchVideoPartsAndMerge() {
+func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoPartsBaseName string) error {
+	utilsGetScript := utilsDir + "/get.sh"
+	utilsCatScript := utilsDir + "/cat.sh"
+
+	file, err := os.Open(filename)
+	if os.IsNotExist(err) {
+		log.Fatal(err)
+	}
+
+	defer file.Close()
+
+	fileContent, _ := ioutil.ReadAll(file)
+	fileContentStr := string(fileContent)
+
+	r := regexp.MustCompile(`[0-9]*\.ts`)
+	videoParts := r.FindAllString(fileContentStr, -1)
+	videoPartsLengthMap := make(map[int]int)
+	urlBase := "https://cdn.91p07.com//m3u8"
+
+	var videoPartsWithoutSuffix []int
+	for _, part := range videoParts {
+		val, _ := strconv.Atoi(part[:len(part)-3])
+		videoPartsWithoutSuffix = append(videoPartsWithoutSuffix, val)
+	}
+
+	sort.Ints(videoPartsWithoutSuffix)
+	finalFileName := videoPartsBaseName
+	lastVideoPartName := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1])
+	n := strings.Index(lastVideoPartName, finalFileName)
+	filePartsCount := lastVideoPartName[n+len(finalFileName):]
+
+	filePartsCountInteger, _ := strconv.Atoi(filePartsCount)
+
+	/* First, query each video parts file length from server */
+	for i := 0; i < filePartsCountInteger; i++ {
+		urlResource := fmt.Sprintf("%s/%s/%s%d.ts", urlBase, finalFileName, finalFileName, i)
+		len, err := fetcher.queryHttpResourceLength(urlResource)
+		if err != nil {
+			return err
+		}
+		key, _ := strconv.Atoi(fmt.Sprintf("%s%d", finalFileName, i))
+		videoPartsLengthMap[key] = len
+	}
+
+	cmd := exec.Command(utilsGetScript, finalFileName, filePartsCount)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	/* TODO: verify that all the video file parts are downloaded completely */
+	dirOfVideoParts := "data/video/video_parts/"
+	for k, v := range videoPartsLengthMap {
+		file := fmt.Sprintf("%s/%d.ts", dirOfVideoParts, k)
+		f, err := os.Open(file)
+
+		if os.IsNotExist(err) {
+			/* Should call download method again */
+		}
+
+		info, _ := f.Stat()
+		if int(info.Size()) < v {
+			/* Should call download method again */
+		}
+
+		f.Close()
+	}
+
+	/* Merge all the downloaded video parts into one and do transcoding */
+	cmd = exec.Command(utilsCatScript, finalFileName, filePartsCount)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 	f, err := os.Open(videoPartsDescTodoDir)
 	if err != nil {
 		log.Fatal(err)
@@ -921,50 +1057,11 @@ func (fether *nineOneFetcher) fetchVideoPartsAndMerge() {
 			baseName := descriptorName[:len(descriptorName)-len(".m3u8")]
 			fmt.Printf("analyze and download file - %s\n", info.Name())
 
-			func(filename string, videoPartsBaseName string) {
-				utilsGetScript := utilsDir + "/get.sh"
-				utilsCatScript := utilsDir + "/cat.sh"
+			err := fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName)
 
-				file, err := os.Open(filename)
-				if os.IsNotExist(err) {
-					log.Fatal(err)
-				}
-
-				defer file.Close()
-
-				fileContent, _ := ioutil.ReadAll(file)
-				fileContentStr := string(fileContent)
-
-				r := regexp.MustCompile(`[0-9]*\.ts`)
-				videoParts := r.FindAllString(fileContentStr, -1)
-				var videoPartsWithoutSuffix []int
-				for _, part := range videoParts {
-					val, _ := strconv.Atoi(part[:len(part)-3])
-					videoPartsWithoutSuffix = append(videoPartsWithoutSuffix, val)
-				}
-
-				sort.Ints(videoPartsWithoutSuffix)
-				finalFileName := videoPartsBaseName
-				lastVideoPartName := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1])
-				n := strings.Index(lastVideoPartName, finalFileName)
-				filePartsCount := lastVideoPartName[n+len(finalFileName):]
-
-				cmd := exec.Command(utilsGetScript, finalFileName, filePartsCount)
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				err = cmd.Run()
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				cmd = exec.Command(utilsCatScript, finalFileName, filePartsCount)
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				err = cmd.Run()
-				if err != nil {
-					log.Fatal(err)
-				}
-			}(videoPartsDescTodoDir+"/"+descriptorName, baseName)
+			if err != nil {
+				return err
+			}
 
 			cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
 			if err = cmd.Run(); err != nil {
@@ -972,6 +1069,8 @@ func (fether *nineOneFetcher) fetchVideoPartsAndMerge() {
 			}
 		}
 	}
+
+	return nil
 }
 
 func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, thumbnail string, thumbnailID int) {
