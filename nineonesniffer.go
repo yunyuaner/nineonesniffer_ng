@@ -902,10 +902,41 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 
 	var newThumbnailsCount int
 
+	httpHeadersFile, err := os.Open("./thumbnail_http_headers.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer httpHeadersFile.Close()
+	headers := make(map[string]string)
+	scanner := bufio.NewScanner(httpHeadersFile)
+	for scanner.Scan() {
+		line := scanner.Text()
+		tuple := strings.Split(line, ":")
+		headers[tuple[0]] = tuple[1]
+	}
+
+	var thumbnail_http_headers string
+	for k, v := range headers {
+		thumbnail_http_headers += ` --header='` + k + `: ` + v + `' `
+	}
+
+	//fmt.Println(thumbnail_http_headers)
+
+	thumbnailf, err := os.OpenFile("thumbnails_dl.sh", os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer thumbnailf.Close()
+
+	thumbnailf.WriteString("#!/bin/bash\n")
+
 	fetcher.sniffer.datasetIterate(func(item *VideoItem) bool {
 		_, ok := thumbnailsMap[item.Thumbnail.ImgName]
 		if !ok {
-			//fmt.Printf("Got new thumbnail - %s\n", item.Thumbnail.ImgName)
+			thumbnailf.WriteString("wget -O data/images/new/" + item.Thumbnail.ImgName +
+				" --timeout 120 " + thumbnail_http_headers + " " + item.Thumbnail.ImgSource + "\n")
 			newThumbnailsCount++
 		}
 		return true

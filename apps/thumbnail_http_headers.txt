@@ -1,0 +1,11 @@
+accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8
+accept-encoding: gzip, deflate, br
+accept-language: en,zh-CN;q=0.9,zh;q=0.8,fr;q=0.7,pt;q=0.6,en-US;q=0.5,zh-TW;q=0.4,en-GB;q=0.3,ja;q=0.2,und;q=0.1,ko;q=0.1
+dnt: 1
+referer: http://www.91porn.com/
+sec-ch-ua: "Google Chrome";v="87", " Not;A Brand";v="99", "Chromium";v="87"
+sec-ch-ua-mobile: ?0
+sec-fetch-dest: image
+sec-fetch-mode: no-cors
+sec-fetch-site: cross-site
+user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
