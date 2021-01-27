@@ -42,6 +42,7 @@ const (
 	videoMergedDir         = "data/video/video_merged"
 	videoPartsDescTodoDir  = "data/video/m3u8/todo"
 	videoPartsDescDoneDir  = "data/video/m3u8/done"
+	videoPartsURLBase      = "https://cdn.91p07.com//m3u8"
 	utilsDir               = "../utils"
 )
 
@@ -1025,7 +1026,6 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoParts
 
 	r := regexp.MustCompile(`[0-9]*\.ts`)
 	videoParts := r.FindAllString(fileContentStr, -1)
-	urlBase := "https://cdn.91p07.com//m3u8"
 	videoPartsLengthMap := make(map[int]int)
 
 	var videoPartsWithoutSuffix []int
@@ -1046,7 +1046,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoParts
 	if reliable {
 		for i := 0; i < filePartsCountInteger; i++ {
 			videoPartsNameWithExt := fmt.Sprintf("%s%d.ts", finalFileName, i)
-			urlResource := fmt.Sprintf("%s/%s/%s", urlBase, finalFileName, videoPartsNameWithExt)
+			urlResource := fmt.Sprintf("%s/%s/%s", videoPartsURLBase, finalFileName, videoPartsNameWithExt)
 			len, err := fetcher.queryHttpResourceLength(urlResource)
 			if err != nil {
 				return err
