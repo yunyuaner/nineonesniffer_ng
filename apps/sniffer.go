@@ -35,12 +35,30 @@ func initParameters() {
 	flag.BoolVar(&help, "help", false, "Show help")
 }
 
+const (
+	tab       = "    "
+	doubleTab = "        "
+)
+
+func showHelp(name string) {
+	fmt.Printf("Usage: %s -mode [prefetch|parse|dl_desc|dl_video] [url] [dir] [count] [persist] [thumbnail] [help]\n", name)
+	fmt.Printf("%sGet the newest video list\n", tab)
+	fmt.Printf("%s%s -mode prefetch -count num\n", doubleTab, name)
+	fmt.Printf("%sParse the newest video list items and persit into datastore\n", tab)
+	fmt.Printf("%s%s -mode parse -dir dirname -persist\n", doubleTab, name)
+	fmt.Printf("%sDownload video descriptor\n", tab)
+	fmt.Printf("%s%s -mode dl_desc -url video_page_url\n", doubleTab, name)
+	fmt.Printf("%sDownload video files using per-downloaded video descriptors\n", tab)
+	fmt.Printf("%s%s -mode dl_video\n", doubleTab, name)
+}
+
 func main() {
 
 	flag.Parse()
 
 	if help {
-		flag.PrintDefaults()
+		showHelp(os.Args[0])
+		//flag.PrintDefaults()
 		os.Exit(0)
 	}
 
@@ -54,7 +72,7 @@ func main() {
 
 	case "parse":
 		if len(dir) == 0 {
-			flag.PrintDefaults()
+			showHelp(os.Args[0])
 			os.Exit(0)
 		}
 		sniffer.RefreshDataset(dir)
@@ -74,7 +92,7 @@ func main() {
 
 	case "dl_desc":
 		if len(url) == 0 {
-			flag.PrintDefaults()
+			showHelp(os.Args[0])
 			os.Exit(0)
 		}
 		sniffer.FetchVideoPartsDscriptor(url)
@@ -83,6 +101,6 @@ func main() {
 		sniffer.FetchVideoPartsAndMerge()
 
 	default:
-		flag.PrintDefaults()
+		showHelp(os.Args[0])
 	}
 }

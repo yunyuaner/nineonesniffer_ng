@@ -533,6 +533,40 @@ func (parser *nineOneParser) parseDetailedVideoItem(fileName string, viewkey str
 	}
 }
 
+func (parser *nineOneParser) parseVideoDescriptor(filename string, videoPartsBaseName string) (string, int) {
+
+	file, err := os.Open(filename)
+	if os.IsNotExist(err) {
+		log.Fatal(err)
+	}
+
+	defer file.Close()
+
+	fileContent, _ := ioutil.ReadAll(file)
+	//fileContentStr := string(fileContent)
+
+	r := regexp.MustCompile(`[0-9]*\.ts`)
+	videoParts := r.FindAllString(string(fileContent), -1)
+	//videoPartsLengthMap := make(map[int]int)
+
+	var videoPartsWithoutSuffix []int
+	for _, part := range videoParts {
+		val, _ := strconv.Atoi(part[:len(part)-3])
+		videoPartsWithoutSuffix = append(videoPartsWithoutSuffix, val)
+	}
+	sort.Ints(videoPartsWithoutSuffix)
+
+	finalFileName := videoPartsBaseName
+	lastVideoPartName := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1])
+	n := strings.Index(lastVideoPartName, finalFileName)
+	filePartsCount := lastVideoPartName[n+len(finalFileName):]
+
+	filePartsCountInteger, _ := strconv.Atoi(filePartsCount)
+
+	/* video file parts begin with suffix 0, so the total count should be the last video parts suffix plus 1 */
+	return finalFileName, (filePartsCountInteger + 1)
+}
+
 func (parser *nineOneParser) refreshDataset(dirname string) (int, error) {
 	//const dirname = "data/list/base"
 	//sniffer := *parser.sniffer
@@ -1040,6 +1074,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 	}
 
 	filename := videoPartsDescTodoDir + "/" + *name
+
 	cmd := exec.Command("wget", "-O", filename, *src)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -1057,6 +1092,85 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 	}
 
 	return nil
+}
+
+func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
+	videoPartsBaseName string) {
+
+	sniffer := *fetcher.sniffer
+	parser := sniffer.parser
+
+	finalFileName, filePartsCountInteger := parser.parseVideoDescriptor(filename,
+		videoPartsBaseName)
+
+	//fmt.Printf("finalFileName - %s, filePartsCountInteger - %02d\n", finalFileName, filePartsCountInteger)
+
+	var howmanyWorkers int
+	if filePartsCountInteger < 10 {
+		howmanyWorkers = filePartsCountInteger
+	} else if filePartsCountInteger >= 10 && filePartsCountInteger < 50 {
+		howmanyWorkers = 10
+	} else {
+		howmanyWorkers = 15
+	}
+
+	func(jobCount int, workerCount int) {
+		taskURLChannel := make(chan string, jobCount)
+		taskResultChannel := make(chan string, jobCount)
+
+		for i := 0; i < workerCount; i++ {
+			go func(workerID int) {
+				for {
+					videoPartURL, ok := <-taskURLChannel
+					if !ok {
+						break
+					}
+
+					videoPartName := videoPartURL[strings.LastIndex(videoPartURL, "/")+1:]
+
+					dirName := "./data/video/video_parts/" + finalFileName
+					_, err := os.Open(dirName)
+					if os.IsNotExist(err) {
+						os.Mkdir(dirName, 0755)
+					}
+
+					name := "./data/video/video_parts/" + finalFileName + "/" + videoPartName
+					cmd := exec.Command("wget", "--timeout", "60", "-O", name, videoPartURL)
+					//fmt.Printf("Worker #%02d is fetching video part - %s\n", workerID, videoPartName)
+					err = cmd.Run()
+
+					if err != nil {
+						fmt.Println(err)
+						taskResultChannel <- fmt.Sprintf("Worker #%02d failed to download video part - %s", workerID, videoPartName)
+					} else {
+						taskResultChannel <- fmt.Sprintf("Worker #%02d done downloading video part - %s", workerID, videoPartName)
+					}
+				}
+			}(i)
+		}
+
+		for j := 0; j < jobCount; j++ {
+			taskURLChannel <- fmt.Sprintf("https://cdn.91p07.com//m3u8/%s/%s%d.ts", finalFileName, finalFileName, j)
+		}
+
+		for n := 0; n < jobCount; n++ {
+			<-taskResultChannel
+			fmt.Printf("\r%02d of %02d Done", n+1, jobCount)
+		}
+		fmt.Printf("\n")
+	}(filePartsCountInteger, howmanyWorkers)
+
+	/* Merge all the downloaded video parts into one and do transcoding */
+	utilsCatScript := utilsDir + "/cat.sh"
+	cmd := exec.Command(utilsCatScript, finalFileName, strconv.Itoa(filePartsCountInteger-1))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		os.Rename("./data/video/m3u8/todo/"+finalFileName+".m3u8", "./data/video/m3u8/done/"+finalFileName+".m3u8")
+	}
 }
 
 func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoPartsBaseName string, reliable bool) error {
@@ -1090,6 +1204,8 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoParts
 	filePartsCount := lastVideoPartName[n+len(finalFileName):]
 
 	filePartsCountInteger, _ := strconv.Atoi(filePartsCount)
+
+	/* @finalFileName and @filePartsCountInteger are required in the next stage */
 
 	/* First, query each video parts file length from server */
 	if reliable {
@@ -1160,11 +1276,8 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 			baseName := descriptorName[:len(descriptorName)-len(".m3u8")]
 			fmt.Printf("analyze and download file - %s\n", info.Name())
 
-			err := fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName, false)
-
-			if err != nil {
-				return err
-			}
+			//fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName, false)
+			fetcher.fetchVideoPartsByNameWithWorkers(videoPartsDescTodoDir+"/"+descriptorName, baseName)
 
 			cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
 			if err = cmd.Run(); err != nil {
