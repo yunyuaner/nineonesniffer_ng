@@ -1021,6 +1021,24 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 	}
 
 	name, src := sniffer.parser.decode(*info)
+
+	isExist := func(filename string) (bool, error) {
+		_, err := os.Open(filename)
+		return !os.IsNotExist(err), err
+	}
+
+	exist, err := isExist(videoPartsDescTodoDir + "/" + *name)
+	if exist {
+		fmt.Printf("video descriptor - %s has already been in the repository, skip now\n", *name)
+		return err
+	}
+
+	exist, err = isExist(videoPartsDescDoneDir + "/" + *name)
+	if exist {
+		fmt.Printf("video descriptor - %s has already been in the repository, skip now\n", *name)
+		return err
+	}
+
 	filename := videoPartsDescTodoDir + "/" + *name
 	cmd := exec.Command("wget", "-O", filename, *src)
 	cmd.Stdout = os.Stdout
