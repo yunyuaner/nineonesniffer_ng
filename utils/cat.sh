@@ -19,4 +19,6 @@ if [ -f "${video_merged_dir}/${video_id}.mp4" ]; then
     rm -rf "${video_merged_dir}/${video_id}.mp4"
 fi
 
-ffmpeg -i ${video_merged_dir}/${video_id}.ts -c:v libx264 -c:a aac -strict -2 ${video_merged_dir}/${video_id}.mp4
+if [ "X$3" == "Xtranscode" ]; then
+    ffmpeg -i ${video_merged_dir}/${video_id}.ts -c:v libx264 -c:a aac -strict -2 ${video_merged_dir}/${video_id}.mp4
+fi

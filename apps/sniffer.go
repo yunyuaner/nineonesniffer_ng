@@ -41,7 +41,7 @@ const (
 )
 
 func showHelp(name string) {
-	fmt.Printf("Usage: %s -mode [prefetch|parse|dl_desc|dl_video] [url] [dir] [count] [persist] [thumbnail] [help]\n", name)
+	fmt.Printf("Usage: %s -mode [prefetch|fetch|parse|dl_desc|dl_video] [url] [dir] [count] [persist] [thumbnail] [help]\n", name)
 	fmt.Printf("%sGet the newest video list\n", tab)
 	fmt.Printf("%s%s -mode prefetch -count num\n", doubleTab, name)
 	fmt.Printf("%sParse the newest video list items and persit into datastore\n", tab)
@@ -82,7 +82,7 @@ func main() {
 		}
 
 	case "fetch":
-		sniffer.Fetch()
+		sniffer.WhatIsNew()
 
 	case "load":
 		sniffer.Load()

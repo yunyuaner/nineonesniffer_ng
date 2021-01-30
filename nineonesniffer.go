@@ -146,7 +146,9 @@ func (sniffer *NineOneSniffer) FetchThumbnails() {
 }
 
 func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string) {
-	sniffer.fetcher.fetchVideoPartsDescriptor(url)
+	if err := sniffer.fetcher.fetchVideoPartsDescriptor(url); err != nil {
+		fmt.Println(err)
+	}
 }
 
 func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge() {
@@ -167,6 +169,35 @@ func (sniffer *NineOneSniffer) Persist() {
 
 func (sniffer *NineOneSniffer) Load() {
 	sniffer.parser.datasetLoad()
+}
+
+/* Fetch the most recent 100 videos */
+func (sniffer *NineOneSniffer) WhatIsNew() {
+	db, _ := sql.Open("sqlite3", "nineone.db")
+
+	defer db.Close()
+
+	rows, err := db.Query("SELECT url, thumbnail_id FROM VideoListTable ORDER by thumbnail_id DESC LIMIT 100")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for rows.Next() {
+		var detailedVideoPageURL string
+		var thumbnail_id int
+
+		err = rows.Scan(&detailedVideoPageURL, &thumbnail_id)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Printf("%d - %s\n", thumbnail_id, detailedVideoPageURL)
+		err = sniffer.fetcher.fetchVideoPartsDescriptor(detailedVideoPageURL)
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+	}
 }
 
 func (sniffer *NineOneSniffer) datasetAppend(key string, item *VideoItem) *VideoItem {
@@ -1039,6 +1070,11 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 	content, err := fetcher.fetchPage(url)
 	if err != nil {
 		return err
+	}
+
+	if strings.Contains(string(content), "Sorry") {
+		//fmt.Printf("Up limit reached, now stop\n")
+		return fmt.Errorf("Up limit reached, now stop")
 	}
 
 	sniffer := *fetcher.sniffer
