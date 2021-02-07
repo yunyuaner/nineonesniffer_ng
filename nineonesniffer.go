@@ -706,15 +706,23 @@ func (parser *nineOneParser) datasetPersist() {
 
 	defer db.Close()
 
+	var newlyAdded int
+
 	//sniffer := *parser.sniffer
 	parser.sniffer.datasetIterate(func(item *VideoItem) bool {
-		fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
+		//fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
 		//videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL)
-		videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL, item.Title, item.Thumbnail.ImgSource, item.Thumbnail.ImgID)
+		err = videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL, item.Title, item.Thumbnail.ImgSource, item.Thumbnail.ImgID)
+		if err == nil {
+			fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
+			newlyAdded++
+		}
 		return true
 	})
 
 	tx.Commit()
+
+	fmt.Printf("%d new items added\n", newlyAdded)
 }
 
 func (parser *nineOneParser) datasetLoad() {
@@ -929,7 +937,8 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 
 	for i := start; i < count; i++ {
 		url = fmt.Sprintf(baseurl+"%d", i+1)
-		fmt.Printf("fetch - %s\n", url)
+		//fmt.Printf("fetch - %s\n", url)
+		fmt.Printf("\r[%4d of %4d] Done", i+1, count)
 
 		info, err := fetcher.fetchPage(url)
 
@@ -940,6 +949,8 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 			return "", err
 		}
 	}
+
+	fmt.Printf("\n")
 
 	return dir, nil
 }
@@ -1325,7 +1336,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 	return nil
 }
 
-func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, thumbnail string, thumbnailID int) {
+func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, thumbnail string, thumbnailID int) error {
 	/* for sql statement, check https://stackoverflow.com/questions/40157049/sqlite-case-statement-insert-if-not-exists */
 	//sql := `insert into VideoListTable(viewkey, url)
 	//			select viewkey, url
@@ -1337,8 +1348,10 @@ func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, 
 	//stmt, _ := tx.Prepare(sql)
 	_, err := stmt.Exec(title, viewkey, url, thumbnail, thumbnailID, time.Now().Format("2006-01-02 15:04:05"))
 	if err != nil {
-		log.Print(err)
+		//log.Print(err)
 		tx.Rollback()
+		return err
 	}
 	tx.Commit()
+	return nil
 }
