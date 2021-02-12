@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 var fileMap map[int]time.Time
 
 func main() {
-	f, err := os.Open("data/images/base")
+	f, err := os.Open("data/images/new")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -35,6 +36,9 @@ func main() {
 
 	db, _ := sql.Open("sqlite3", "nineone.db")
 
+	fileMapSize := len(fileMap)
+	var counter int
+
 	for k, v := range fileMap {
 		//fmt.Printf("videoID - %d, date - %s\n", k, v.Format("2006-01-02 15:04:05"))
 		tx, _ := db.Begin()
@@ -45,6 +49,11 @@ func main() {
 			continue
 		}
 
+		counter++
+		fmt.Printf("\r[%6d of %d] updated", counter, fileMapSize)
+
 		tx.Commit()
 	}
+
+	fmt.Printf("\nDone\n")
 }
