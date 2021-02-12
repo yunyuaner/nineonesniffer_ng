@@ -160,11 +160,15 @@ func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge() {
 func (sniffer *NineOneSniffer) RefreshDataset(dirname string) {
 	sniffer.parser.refreshDataset(dirname)
 	fmt.Printf("Got %d items\n", sniffer.datasetSize())
-	//sniffer.parser.datasetPersist()
+	//sniffer.parser.datasetSync()
 }
 
 func (sniffer *NineOneSniffer) Persist() {
 	sniffer.parser.datasetPersist()
+}
+
+func (sniffer *NineOneSniffer) Sync() {
+	sniffer.parser.datasetSync()
 }
 
 func (sniffer *NineOneSniffer) Load() {
@@ -192,12 +196,27 @@ func (sniffer *NineOneSniffer) WhatIsNew() {
 		}
 
 		fmt.Printf("%d - %s\n", thumbnail_id, detailedVideoPageURL)
+
+		if _, err = os.Open("./data/video/m3u8/todo" + strconv.Itoa(thumbnail_id) + ".m3u8"); !os.IsNotExist(err) {
+			fmt.Printf("skip\n")
+			continue
+		}
+
+		if _, err = os.Open("./data/video/m3u8/done" + strconv.Itoa(thumbnail_id) + ".m3u8"); !os.IsNotExist(err) {
+			fmt.Printf("skip\n")
+			continue
+		}
+
 		err = sniffer.fetcher.fetchVideoPartsDescriptor(detailedVideoPageURL)
 		if err != nil {
 			fmt.Println(err)
 			break
 		}
 	}
+}
+
+func (sniffer *NineOneSniffer) ParseVideoList(filename string) {
+	sniffer.parser.parseVideoList(filename)
 }
 
 func (sniffer *NineOneSniffer) datasetAppend(key string, item *VideoItem) *VideoItem {
@@ -248,7 +267,7 @@ func findFirstChildOfElementNode(node *html.Node, tagName string) (*html.Node, e
 }
 
 func findSiblingOfElementNode(node *html.Node, tagName string) (*html.Node, error) {
-	for c := node; c != nil; c = c.NextSibling {
+	for c := node.NextSibling; c != nil; c = c.NextSibling {
 		if c.Type == html.ElementNode && c.Data == tagName {
 			return c, nil
 		}
@@ -360,6 +379,31 @@ func (parser *nineOneParser) parseVideoList(fileName string) (items []*VideoItem
 func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
 	items := data.(*[]*VideoItem)
 
+	/**
+			<div class="well well-sm videos-text-align">
+
+	          <a href="http://www.91porn.com/view_video.php?viewkey=b7af4fb81bf14a65ef4e&page=1&viewtype=basic&category=mr">
+	            <div class="thumb-overlay"   id="playvthumb_433614" >
+	              <img class="img-responsive" src="https://i.p04.space/thumb/433614.jpg" />
+	               <div class="hd-text-icon">HD</div>
+	              <span class="duration">03:05</span>
+	            </div>
+	            <span class="video-title title-truncate m-t-5">酒店跟女同事xx</span>
+	          </a>
+
+	 		  <link rel="stylesheet" href="/css/voting.css" />
+
+
+
+	          <span class="info">添加时间:</span>  36 分钟  前 <br />
+	          <span class="info">作者:</span> lyzwwwwww<br/>
+	          <span class="info">查看:</span> 346&nbsp;
+	          <span class="info">收藏:</span> 3
+			  <span class="info">留言:</span> 0&nbsp;<br>
+	          <span class="info">积分:</span> 0&nbsp; &nbsp; &nbsp; &nbsp;<img src=images/like.png height=10>0&nbsp; <img src=images/dislike.png height=10> 0
+
+	        </div>
+	*/
 	if n.Type == html.ElementNode && n.Data == "a" {
 		var videoDetailedPageURL, imgSource string
 		var title string
@@ -412,6 +456,13 @@ func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
 			imgIDStr := imgName[:pos]
 			imgID, _ := strconv.Atoi(imgIDStr)
 
+			// Parse video duration
+			durationElem, _ := findSiblingOfElementNode(imgElem, "span")
+			durationText, _ := getInnerHTMLOfElementNode(durationElem)
+			durationText = strings.Replace(durationText, ":", "m", 1)
+			durationText = fmt.Sprintf("%ss", durationText)
+			duration, _ := time.ParseDuration(durationText)
+
 			// Parse video title
 			spanElem, err := findSiblingOfElementNode(divElem, "span")
 			if err != nil {
@@ -437,18 +488,29 @@ func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
 				title, _ = getInnerHTMLOfElementNode(spanElem)
 			}
 
+			// Parse video author
+			spanSibling, _ := findSiblingOfElementNode(n, "span")
+			spanAuthor, _ := findSiblingOfElementNode(spanSibling, "span")
+			author := spanAuthor.NextSibling.Data
+			author = strings.TrimSpace(author)
+			author = strings.Trim(author, "\n\r\t")
+
 			item := &VideoItem{
 				Title:                title,
+				Author:               author,
 				VideoDetailedPageURL: videoDetailedPageURL,
 				ViewKey:              viewkey,
+				VideoTime:            duration,
 				Thumbnail:            ImageItem{ImgSource: imgSource, ImgName: imgName, ImgID: imgID},
 			}
 
 			//fmt.Println(title)
+			//fmt.Println(author)
 			//fmt.Println(imgSource)
 			//fmt.Println(imgName)
 			//fmt.Println(imgID)
 			//fmt.Println(viewkey)
+			//fmt.Println(duration)
 			//fmt.Printf("\n")
 
 			*items = append(*items, item)
@@ -710,9 +772,10 @@ func (parser *nineOneParser) datasetPersist() {
 
 	//sniffer := *parser.sniffer
 	parser.sniffer.datasetIterate(func(item *VideoItem) bool {
-		//fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
-		//videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL)
-		err = videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL, item.Title, item.Thumbnail.ImgSource, item.Thumbnail.ImgID)
+		//fmt.Printf("title - %s, author - %s, duration - %s\n", item.Title, item.Author, item.VideoTime.String())
+		err = videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL,
+			item.Title, item.Thumbnail.ImgSource, item.Thumbnail.ImgID,
+			item.Author, item.VideoTime.String())
 		if err == nil {
 			fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
 			newlyAdded++
@@ -723,6 +786,39 @@ func (parser *nineOneParser) datasetPersist() {
 	tx.Commit()
 
 	fmt.Printf("%d new items added\n", newlyAdded)
+}
+
+func (parser *nineOneParser) datasetSync() {
+	db, err := sql.Open("sqlite3", "nineone.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var synced int
+
+	syncFunc := func(item *VideoItem) bool {
+		tx, _ := db.Begin()
+		stmt, _ := tx.Prepare("update VideoListTable set author=?, duration=? where thumbnail_id=?")
+		_, err := stmt.Exec(item.Author, item.VideoTime.String(), strconv.Itoa(item.Thumbnail.ImgID))
+		if err != nil {
+			tx.Rollback()
+		}
+		tx.Commit()
+		synced++
+		fmt.Printf("\r%6d items synced", synced)
+		return true
+	}
+
+	parser.sniffer.datasetIterate(syncFunc)
+
+	tx.Commit()
 }
 
 func (parser *nineOneParser) datasetLoad() {
@@ -1336,7 +1432,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 	return nil
 }
 
-func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, thumbnail string, thumbnailID int) error {
+func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, thumbnail string, thumbnailID int, author string, videoTime string) error {
 	/* for sql statement, check https://stackoverflow.com/questions/40157049/sqlite-case-statement-insert-if-not-exists */
 	//sql := `insert into VideoListTable(viewkey, url)
 	//			select viewkey, url
@@ -1344,9 +1440,9 @@ func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, 
 	//			where not exists (select 1 from VideoListTable where VideoListTable.viewkey = t.vk)`
 	//fmt.Println(sql)
 	tx, _ := db.Begin()
-	stmt, _ := tx.Prepare("insert into VideoListTable (title, viewkey, url, thumbnail, thumbnail_id, date) values (?,?,?,?,?,?)")
+	stmt, _ := tx.Prepare("insert into VideoListTable (title, viewkey, url, thumbnail, thumbnail_id, date, author, duration) values (?,?,?,?,?,?,?,?)")
 	//stmt, _ := tx.Prepare(sql)
-	_, err := stmt.Exec(title, viewkey, url, thumbnail, thumbnailID, time.Now().Format("2006-01-02 15:04:05"))
+	_, err := stmt.Exec(title, viewkey, url, thumbnail, thumbnailID, time.Now().Format("2006-01-02 15:04:05"), author, videoTime)
 	if err != nil {
 		//log.Print(err)
 		tx.Rollback()
