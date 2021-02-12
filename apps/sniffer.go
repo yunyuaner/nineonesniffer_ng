@@ -16,6 +16,7 @@ var dir string
 var persist bool
 var thumbnail bool
 var help bool
+var transcode bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
@@ -32,6 +33,7 @@ func initParameters() {
 	flag.StringVar(&dir, "dir", "", "Target directory")
 	flag.BoolVar(&persist, "persist", false, "Persit infomation into database")
 	flag.BoolVar(&thumbnail, "thumbnail", false, "See how many new thumbnails we newly got")
+	flag.BoolVar(&transcode, "transcode", false, "Convert download video files from ts to mp4 format")
 	flag.BoolVar(&help, "help", false, "Show help")
 }
 
@@ -49,7 +51,7 @@ func showHelp(name string) {
 	fmt.Printf("%sDownload video descriptor\n", tab)
 	fmt.Printf("%s%s -mode dl_desc -url video_page_url\n", doubleTab, name)
 	fmt.Printf("%sDownload video files using per-downloaded video descriptors\n", tab)
-	fmt.Printf("%s%s -mode dl_video\n", doubleTab, name)
+	fmt.Printf("%s%s -mode dl_video [-transcode]\n", doubleTab, name)
 	fmt.Printf("%sSync video date set with more detail items\n", tab)
 	fmt.Printf("%s%s -mode sync\n", doubleTab, name)
 	fmt.Printf("%sGenerate thumbnails fetching script\n", tab)
@@ -111,6 +113,9 @@ func main() {
 
 	case "dl_video":
 		sniffer.FetchVideoPartsAndMerge()
+		if transcode {
+			sniffer.Transcode = true
+		}
 
 	default:
 		showHelp(os.Args[0])

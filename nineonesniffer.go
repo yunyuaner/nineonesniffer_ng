@@ -111,9 +111,10 @@ func (ds *VideoDataSet) iterate(visitor func(item *VideoItem) bool) {
 //var vds VideoDataSet
 
 type NineOneSniffer struct {
-	fetcher nineOneFetcher
-	parser  nineOneParser
-	ds      VideoDataSet
+	fetcher   nineOneFetcher
+	parser    nineOneParser
+	ds        VideoDataSet
+	Transcode bool
 }
 
 type nineOneFetcher struct {
@@ -131,6 +132,7 @@ func (sniffer *NineOneSniffer) Init() {
 	sniffer.parser.sniffer = sniffer
 	sniffer.fetcher.userAgent = mozillaUserAgentString
 	sniffer.ds = make(map[string]*VideoItem)
+	sniffer.Transcode = false
 }
 
 func (sniffer *NineOneSniffer) Prefetch(count int) (string, error) {
@@ -1305,7 +1307,12 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 	/* Merge all the downloaded video parts into one and do transcoding */
 	utilsCatScript := utilsDir + "/cat.sh"
-	cmd := exec.Command(utilsCatScript, finalFileName, strconv.Itoa(filePartsCountInteger-1))
+	var cmd *exec.Cmd
+	if fetcher.sniffer.Transcode {
+		cmd = exec.Command(utilsCatScript, finalFileName, strconv.Itoa(filePartsCountInteger-1), "transcode")
+	} else {
+		cmd = exec.Command(utilsCatScript, finalFileName, strconv.Itoa(filePartsCountInteger-1))
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
