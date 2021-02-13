@@ -1096,6 +1096,7 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 	}
 
 	//fmt.Println(thumbnail_http_headers)
+	os.Remove("thumbnails_dl.sh")
 
 	thumbnailf, err := os.OpenFile("thumbnails_dl.sh", os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
