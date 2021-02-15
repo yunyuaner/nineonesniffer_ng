@@ -44,17 +44,23 @@ const (
 
 func showHelp(name string) {
 	fmt.Printf("Usage: %s -mode [prefetch|fetch|parse|dl_desc|dl_video|sync|load] [url] [dir] [count] [persist] [thumbnail] [help]\n", name)
+
 	fmt.Printf("%sGet the newest video list\n", tab)
 	fmt.Printf("%s%s -mode prefetch -count num\n", doubleTab, name)
+
 	fmt.Printf("%sParse the newest video list items and persit into datastore\n", tab)
 	fmt.Printf("%s%s -mode parse -dir dirname -persist\n", doubleTab, name)
+
 	fmt.Printf("%sDownload video descriptor\n", tab)
 	fmt.Printf("%s%s -mode dl_desc -url video_page_url\n", doubleTab, name)
+
 	fmt.Printf("%sDownload video files using per-downloaded video descriptors\n", tab)
 	fmt.Printf("%s%s -mode dl_video [-transcode]\n", doubleTab, name)
-	fmt.Printf("%sSync video date set with more detail items\n", tab)
-	fmt.Printf("%s%s -mode sync\n", doubleTab, name)
-	fmt.Printf("%sGenerate thumbnails fetching script\n", tab)
+
+	//fmt.Printf("%sSync video date set with more detail items\n", tab)
+	//fmt.Printf("%s%s -mode sync\n", doubleTab, name)
+
+	fmt.Printf("%sDownload thumbnails and identify video uploaded date accordingly\n", tab)
 	fmt.Printf("%s%s -mode load -thumbnail\n", doubleTab, name)
 }
 
@@ -76,13 +82,13 @@ func main() {
 		}
 		fmt.Printf("Prefetched pages stored in %s\n", dirname)
 
-	case "sync":
-		if len(dir) == 0 {
-			showHelp(os.Args[0])
-			os.Exit(0)
-		}
-		sniffer.RefreshDataset(dir)
-		sniffer.Sync()
+	//case "sync":
+	//	if len(dir) == 0 {
+	//		showHelp(os.Args[0])
+	//		os.Exit(0)
+	//	}
+	//	sniffer.RefreshDataset(dir)
+	//	sniffer.Sync()
 
 	case "parse":
 		if len(dir) == 0 {
@@ -102,6 +108,7 @@ func main() {
 		sniffer.Load()
 		if thumbnail {
 			sniffer.FetchThumbnails()
+			sniffer.IdentifyVideoUploadedDate()
 		}
 
 	case "dl_desc":
@@ -112,10 +119,10 @@ func main() {
 		sniffer.FetchVideoPartsDscriptor(url)
 
 	case "dl_video":
-		sniffer.FetchVideoPartsAndMerge()
 		if transcode {
 			sniffer.Transcode = true
 		}
+		sniffer.FetchVideoPartsAndMerge()
 
 	default:
 		showHelp(os.Args[0])

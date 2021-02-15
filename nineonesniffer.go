@@ -165,6 +165,10 @@ func (sniffer *NineOneSniffer) RefreshDataset(dirname string) {
 	//sniffer.parser.datasetSync()
 }
 
+func (sniffer *NineOneSniffer) IdentifyVideoUploadedDate() {
+	sniffer.parser.identifyVideoUploadedDate()
+}
+
 func (sniffer *NineOneSniffer) Persist() {
 	sniffer.parser.datasetPersist()
 }
@@ -662,6 +666,53 @@ func (parser *nineOneParser) parseVideoDescriptor(filename string, videoPartsBas
 	return finalFileName, (filePartsCountInteger + 1)
 }
 
+func (parser *nineOneParser) identifyVideoUploadedDate() {
+	var fileMap map[int]time.Time
+
+	f, err := os.Open("data/images/new")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	info, err := f.Readdir(0)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fileMap = make(map[int]time.Time)
+
+	for _, fileInfo := range info {
+		//fmt.Printf("file - %s, date - %s\n", fileInfo.Name(), fileInfo.ModTime().Format("2006-01-02 15:04:05"))
+
+		videoID, _ := strconv.Atoi(fileInfo.Name()[:len(fileInfo.Name())-4])
+
+		fileMap[videoID] = fileInfo.ModTime()
+	}
+
+	db, _ := sql.Open("sqlite3", "nineone.db")
+
+	fileMapSize := len(fileMap)
+	var counter int
+
+	for k, v := range fileMap {
+		//fmt.Printf("videoID - %d, date - %s\n", k, v.Format("2006-01-02 15:04:05"))
+		tx, _ := db.Begin()
+		stmt, _ := tx.Prepare("update VideoListTable set upload_date=?  where thumbnail_id=?")
+		_, err := stmt.Exec(v.Format("2006-01-02 15:04:05"), strconv.Itoa(k))
+		if err != nil {
+			tx.Rollback()
+			continue
+		}
+
+		counter++
+		fmt.Printf("\r[%6d of %d] updated", counter, fileMapSize)
+
+		tx.Commit()
+	}
+
+	fmt.Printf("\nDone\n")
+}
+
 func (parser *nineOneParser) refreshDataset(dirname string) (int, error) {
 	//const dirname = "data/list/base"
 	//sniffer := *parser.sniffer
@@ -1103,8 +1154,6 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 		log.Fatal(err)
 	}
 
-	defer thumbnailf.Close()
-
 	thumbnailf.WriteString("#!/bin/bash\n")
 
 	fetcher.sniffer.datasetIterate(func(item *VideoItem) bool {
@@ -1117,8 +1166,21 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 		return true
 	})
 
+	thumbnailf.WriteString("mv -f data/images/new/*.jpg data/images/base/")
+
 	fmt.Printf("Existing thumbnails count - %d\n", len(thumbnailsMap))
 	fmt.Printf("Newly got thumbnails count - %d\n", newThumbnailsCount)
+
+	thumbnailf.Close()
+
+	if newThumbnailsCount > 0 {
+		cmd := exec.Command("./thumbnails_dl.sh")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Println(err)
+		}
+	}
 }
 
 func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
