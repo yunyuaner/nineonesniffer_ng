@@ -43,7 +43,7 @@ const (
 )
 
 func showHelp(name string) {
-	fmt.Printf("Usage: %s -mode [prefetch|fetch|parse|dl_desc|dl_video|sync|load] [url] [dir] [count] [persist] [thumbnail] [help]\n", name)
+	fmt.Printf("Usage: %s -mode [prefetch|fetch|parse|dl_desc|dl_video|sync|load|identify_date] [url] [dir] [count] [persist] [thumbnail] [help]\n", name)
 
 	fmt.Printf("%sGet the newest video list\n", tab)
 	fmt.Printf("%s%s -mode prefetch -count num\n", doubleTab, name)
@@ -57,11 +57,14 @@ func showHelp(name string) {
 	fmt.Printf("%sDownload video files using per-downloaded video descriptors\n", tab)
 	fmt.Printf("%s%s -mode dl_video [-transcode]\n", doubleTab, name)
 
-	//fmt.Printf("%sSync video date set with more detail items\n", tab)
-	//fmt.Printf("%s%s -mode sync\n", doubleTab, name)
+	fmt.Printf("%sSync the lastest video list ( prefetch + parse )\n", tab)
+	fmt.Printf("%s%s -mode sync -count num\n", doubleTab, name)
 
-	fmt.Printf("%sDownload thumbnails and identify video uploaded date accordingly\n", tab)
+	fmt.Printf("%sDownload thumbnails\n", tab)
 	fmt.Printf("%s%s -mode load -thumbnail\n", doubleTab, name)
+
+	fmt.Printf("%sIdentify video uploaded date according to thumbnails\n", tab)
+	fmt.Printf("%s%s -mode identify_date\n", doubleTab, name)
 }
 
 func main() {
@@ -82,13 +85,13 @@ func main() {
 		}
 		fmt.Printf("Prefetched pages stored in %s\n", dirname)
 
-	//case "sync":
-	//	if len(dir) == 0 {
-	//		showHelp(os.Args[0])
-	//		os.Exit(0)
-	//	}
-	//	sniffer.RefreshDataset(dir)
-	//	sniffer.Sync()
+	case "sync":
+		dirname, err := sniffer.Prefetch(count)
+		if err != nil {
+			log.Fatal(err)
+		}
+		sniffer.RefreshDataset(dirname)
+		sniffer.Persist()
 
 	case "parse":
 		if len(dir) == 0 {
@@ -108,8 +111,11 @@ func main() {
 		sniffer.Load()
 		if thumbnail {
 			sniffer.FetchThumbnails()
-			sniffer.IdentifyVideoUploadedDate()
+			//sniffer.IdentifyVideoUploadedDate()
 		}
+
+	case "identify_date":
+		sniffer.IdentifyVideoUploadedDate()
 
 	case "dl_desc":
 		if len(url) == 0 {

@@ -36,8 +36,7 @@ const (
 	baseurl                = "http://www.91porn.com/v.php?next=watch&page="
 	mozillaUserAgentString = "Mozilla/5.0 (platform; rv:17.0) Gecko/20100101 SeaMonkey/2.7.1"
 	start                  = 0
-	videoListDatabase      = "video_list_by_viewkey.txt"
-	cookieFile             = "cookies.txt"
+	cookieFile             = "./configs/cookies.txt"
 	videoPartsDir          = "data/video/video_parts"
 	videoMergedDir         = "data/video/video_merged"
 	videoPartsDescTodoDir  = "data/video/m3u8/todo"
@@ -162,7 +161,6 @@ func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge() {
 func (sniffer *NineOneSniffer) RefreshDataset(dirname string) {
 	sniffer.parser.refreshDataset(dirname)
 	fmt.Printf("Got %d items\n", sniffer.datasetSize())
-	//sniffer.parser.datasetSync()
 }
 
 func (sniffer *NineOneSniffer) IdentifyVideoUploadedDate() {
@@ -687,9 +685,13 @@ func (parser *nineOneParser) identifyVideoUploadedDate() {
 		videoID, _ := strconv.Atoi(fileInfo.Name()[:len(fileInfo.Name())-4])
 
 		fileMap[videoID] = fileInfo.ModTime()
+		os.Rename("./data/images/new/"+fileInfo.Name(), "./data/images/base/"+fileInfo.Name())
 	}
 
+	f.Close()
+
 	db, _ := sql.Open("sqlite3", "nineone.db")
+	defer db.Close()
 
 	fileMapSize := len(fileMap)
 	var counter int
@@ -1127,7 +1129,7 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 
 	var newThumbnailsCount int
 
-	httpHeadersFile, err := os.Open("./thumbnail_http_headers.txt")
+	httpHeadersFile, err := os.Open("./configs/thumbnail_http_headers.txt")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1147,7 +1149,7 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 	}
 
 	//fmt.Println(thumbnail_http_headers)
-	os.Remove("thumbnails_dl.sh")
+	os.Remove("./thumbnails_dl.sh")
 
 	thumbnailf, err := os.OpenFile("thumbnails_dl.sh", os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
@@ -1166,8 +1168,6 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 		return true
 	})
 
-	thumbnailf.WriteString("mv -f data/images/new/*.jpg data/images/base/")
-
 	fmt.Printf("Existing thumbnails count - %d\n", len(thumbnailsMap))
 	fmt.Printf("Newly got thumbnails count - %d\n", newThumbnailsCount)
 
@@ -1181,6 +1181,8 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 			fmt.Println(err)
 		}
 	}
+
+	os.Remove("./thumbnails_dl.sh")
 }
 
 func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
