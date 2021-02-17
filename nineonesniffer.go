@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,37 @@ const (
 	videoPartsURLBase      = "https://cdn.91p07.com//m3u8"
 	utilsDir               = "../utils"
 )
+
+type nineOneSnifferDaemonCfg struct {
+	baseURL                  string `json:"base_url"`
+	videoPartsURLBase        string `json:"video_parts_url_base"`
+	userAgent                string `json:"user_agent"`
+	configBaseDir            string `json:"config_base_dir"`
+	cookieFile               string `json:"cookie_file"`
+	thumbnailHttpHeadersFile string `json:"thumbnail_http_headers_file"`
+	dataBaseDir              string `json:"data_base_dir"`
+	videoPartsDir            string `json:"video_parts_dir"`
+	videoMergedDir           string `json:"video_merged_dir"`
+	videoPartsDescTodoDir    string `json:"video_parts_desc_todo_dir"`
+	videoPartsDescDoneDir    string `json:"video_parts_desc_done_dir"`
+	videoListBaseDir         string `json:"video_list_base_dir"`
+	thumbnailBaseDir         string `json:"thumbnail_base_dir"`
+	thumbnailNewDir          string `json:"thumbnail_new_dir"`
+	utilsDir                 string `json:"utils_dir"`
+	tempDir                  string `json:"temp_dir"`
+}
+
+type nineOneSnifferWebGUICfg struct {
+}
+
+type nineOneSnifferCliCfg struct {
+}
+
+type nineOneSnifferCfg struct {
+	snifferDaemon nineOneSnifferDaemonCfg `json:"sniffer_daemon"`
+	webgui        nineOneSnifferWebGUICfg `json:"webgui"`
+	cli           nineOneSnifferCliCfg    `json:"cli"`
+}
 
 type ImageItem struct {
 	ImgID     int
@@ -114,6 +146,7 @@ type NineOneSniffer struct {
 	parser    nineOneParser
 	ds        VideoDataSet
 	Transcode bool
+	cfg       nineOneSnifferCfg
 }
 
 type nineOneFetcher struct {
@@ -127,11 +160,35 @@ type nineOneParser struct {
 }
 
 func (sniffer *NineOneSniffer) Init() {
+	f, err := os.Open("./configs/NineOneSniffer.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer f.Close()
+
+	info, err := ioutil.ReadAll(f)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	cfg := &((*sniffer).cfg)
+
+	err = json.Unmarshal(info, cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	sniffer.fetcher.sniffer = sniffer
 	sniffer.parser.sniffer = sniffer
 	sniffer.fetcher.userAgent = mozillaUserAgentString
 	sniffer.ds = make(map[string]*VideoItem)
 	sniffer.Transcode = false
+}
+
+func (sniffer *NineOneSniffer) DumpCfg() {
+	daemonCfg := &((*sniffer).cfg.snifferDaemon)
+	fmt.Printf("baseURL - %s\n", daemonCfg.baseURL)
 }
 
 func (sniffer *NineOneSniffer) Prefetch(count int) (string, error) {

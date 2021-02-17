@@ -17,6 +17,7 @@ var persist bool
 var thumbnail bool
 var help bool
 var transcode bool
+var dumpCfg bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
@@ -35,6 +36,7 @@ func initParameters() {
 	flag.BoolVar(&thumbnail, "thumbnail", false, "See how many new thumbnails we newly got")
 	flag.BoolVar(&transcode, "transcode", false, "Convert download video files from ts to mp4 format")
 	flag.BoolVar(&help, "help", false, "Show help")
+	flag.BoolVar(&dumpCfg, "dump_cfg", false, "Dump configurations")
 }
 
 const (
@@ -55,7 +57,7 @@ func showHelp(name string) {
 	fmt.Printf("%s%s -mode dl_desc -url video_page_url\n", doubleTab, name)
 
 	fmt.Printf("%sDownload video files using per-downloaded video descriptors\n", tab)
-	fmt.Printf("%s%s -mode dl_video [-transcode]\n", doubleTab, name)
+	fmt.Printf("%s%s -mode dl_video [-url video_page_url] [-transcode]\n", doubleTab, name)
 
 	fmt.Printf("%sSync the lastest video list ( prefetch + parse )\n", tab)
 	fmt.Printf("%s%s -mode sync -count num\n", doubleTab, name)
@@ -74,6 +76,11 @@ func main() {
 	if help {
 		showHelp(os.Args[0])
 		//flag.PrintDefaults()
+		os.Exit(0)
+	}
+
+	if dumpCfg {
+		sniffer.DumpCfg()
 		os.Exit(0)
 	}
 
@@ -125,6 +132,10 @@ func main() {
 		sniffer.FetchVideoPartsDscriptor(url)
 
 	case "dl_video":
+		if len(url) > 0 {
+			sniffer.FetchVideoPartsDscriptor(url)
+		}
+
 		if transcode {
 			sniffer.Transcode = true
 		}
