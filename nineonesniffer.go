@@ -1225,6 +1225,9 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 		return true
 	})
 
+	thumbnailf.WriteString("curr_date=`date +'%y-%m-%dT%H:%M:%S.%N'`")
+	thumbnailf.WriteString("tar zcvf /var/www/html/data/images/images.${curr_date}.tar.gz data/images/new")
+
 	fmt.Printf("Existing thumbnails count - %d\n", len(thumbnailsMap))
 	fmt.Printf("Newly got thumbnails count - %d\n", newThumbnailsCount)
 
