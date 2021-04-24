@@ -203,8 +203,8 @@ func (sniffer *NineOneSniffer) FetchThumbnails() {
 	sniffer.fetcher.fetchThumbnails()
 }
 
-func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string) {
-	if err := sniffer.fetcher.fetchVideoPartsDescriptor(url); err != nil {
+func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string, saveToDb bool) {
+	if err := sniffer.fetcher.fetchVideoPartsDescriptor(url, saveToDb); err != nil {
 		fmt.Println(err)
 	}
 }
@@ -269,7 +269,7 @@ func (sniffer *NineOneSniffer) WhatIsNew() {
 			continue
 		}
 
-		err = sniffer.fetcher.fetchVideoPartsDescriptor(detailedVideoPageURL)
+		err = sniffer.fetcher.fetchVideoPartsDescriptor(detailedVideoPageURL, false)
 		if err != nil {
 			fmt.Println(err)
 			break
@@ -1473,7 +1473,7 @@ func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 	}
 }
 
-func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
+func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool) error {
 	if len(url) == 0 {
 		return fmt.Errorf("url shouldn't be empty")
 	}
@@ -1495,7 +1495,32 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 		return err
 	}
 
+	persist := func(name, url string) {
+		thumbnail_id, _ := strconv.Atoi(name[:(len(name) - len(".m3u8"))])
+
+		db, err := sql.Open("sqlite3", "nineone.db")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer db.Close()
+
+		tx, _ := db.Begin()
+		stmt, _ := tx.Prepare("update VideoListTable set descriptor_url=?  where thumbnail_id=?")
+		_, err = stmt.Exec(url, thumbnail_id)
+		if err != nil {
+			fmt.Println(err)
+			tx.Rollback()
+		}
+
+		tx.Commit()
+	}
+
 	name, src := sniffer.parser.decode(*info)
+
+	if saveToDb {
+		persist(*name, *src)
+	}
 
 	isExist := func(filename string) (bool, error) {
 		_, err := os.Open(filename)

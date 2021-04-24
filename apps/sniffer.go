@@ -54,10 +54,10 @@ func showHelp(name string) {
 	fmt.Printf("%s%s -mode parse -dir dirname -persist\n", doubleTab, name)
 
 	fmt.Printf("%sDownload video descriptor\n", tab)
-	fmt.Printf("%s%s -mode dl_desc -url video_page_url\n", doubleTab, name)
+	fmt.Printf("%s%s -mode dl_desc -url video_page_url [-presist]\n", doubleTab, name)
 
 	fmt.Printf("%sDownload video files using per-downloaded video descriptors\n", tab)
-	fmt.Printf("%s%s -mode dl_video [-url video_page_url] [-transcode]\n", doubleTab, name)
+	fmt.Printf("%s%s -mode dl_video [-url video_page_url] [-transcode] [-persist]\n", doubleTab, name)
 
 	fmt.Printf("%sSync the lastest video list ( prefetch + parse )\n", tab)
 	fmt.Printf("%s%s -mode sync -count num\n", doubleTab, name)
@@ -129,11 +129,11 @@ func main() {
 			showHelp(os.Args[0])
 			os.Exit(0)
 		}
-		sniffer.FetchVideoPartsDscriptor(url)
+		sniffer.FetchVideoPartsDscriptor(url, persist)
 
 	case "dl_video":
 		if len(url) > 0 {
-			sniffer.FetchVideoPartsDscriptor(url)
+			sniffer.FetchVideoPartsDscriptor(url, persist)
 		}
 
 		if transcode {
