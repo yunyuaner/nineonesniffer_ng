@@ -1065,18 +1065,21 @@ func (parser *nineOneParser) decode(infoStr string) (*string, *string) {
 	 * notice that the former url doesn't have http get parameters!!
 	 */
 	unescaped := b.String()
+
+	fmt.Println(unescaped)
+
 	start = strings.Index(unescaped, "src='") + len("src='")
 	end = strings.Index(unescaped[start:], "'")
 	srcWithParams := unescaped[start : start+end]
 	questionMarkPos := strings.Index(srcWithParams, "?")
 	var name string
 
+	fmt.Println(srcWithParams)
+
 	if questionMarkPos == -1 {
 		/* Case 2), in case of no http get parameters */
-		singleQuoteMarkPos := strings.Index(srcWithParams, "'")
-		httpGetSrc := srcWithParams[:singleQuoteMarkPos]
-		slash := strings.LastIndex(httpGetSrc, "/")
-		name = httpGetSrc[slash+1:]
+		slash := strings.LastIndex(srcWithParams, "/")
+		name = srcWithParams[slash+1:]
 	} else {
 		/* Case 1) */
 		httpGetSrc := srcWithParams[:questionMarkPos]
