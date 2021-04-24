@@ -221,7 +221,8 @@ func (sniffer *NineOneSniffer) RefreshDataset(dirname string) {
 }
 
 func (sniffer *NineOneSniffer) IdentifyVideoUploadedDate() {
-	sniffer.parser.identifyVideoUploadedDate()
+	//sniffer.parser.identifyVideoUploadedDate()
+	sniffer.parser.identifyVideoUploadedDate2()
 }
 
 func (sniffer *NineOneSniffer) Persist() {
@@ -721,6 +722,81 @@ func (parser *nineOneParser) parseVideoDescriptor(filename string, videoPartsBas
 	return finalFileName, (filePartsCountInteger + 1)
 }
 
+/* Query video uploaded date using http header 'Last-Modified' */
+func (parser *nineOneParser) identifyVideoUploadedDate2() {
+	db, err := sql.Open("sqlite3", "nineone.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer db.Close()
+
+	/* Query from database and find the video items that has no upload_date yet */
+	rows, err := db.Query("select thumbnail_id, thumbnail from VideoListTable where upload_date is null")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	type partial struct {
+		thumbnail_id  int
+		thumbnail     string
+		uploaded_date time.Time
+		valid         bool
+	}
+
+	var partialist []partial
+
+	for rows.Next() {
+		var thumbnailID int
+		var thumbnail string
+
+		err = rows.Scan(&thumbnailID, &thumbnail)
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+		partialist = append(partialist, partial{thumbnail_id: thumbnailID, thumbnail: thumbnail})
+	}
+
+	fmt.Printf("\rGot %d items \n", len(partialist))
+
+	fetcher := parser.sniffer.fetcher
+	failcount := 0
+
+	for _, item := range partialist {
+		/* Query upload_date, use multi-task approach later */
+		_, lastModified, err := fetcher.queryHttpResourceLength(item.thumbnail)
+		if err != nil {
+			fmt.Printf("Failed to query timestamp from video item %d\n", item.thumbnail_id)
+			failcount = failcount + 1
+			if failcount >= 10 {
+				fmt.Printf("Something went wrong, will quit now, you may try it later\n")
+				break
+			}
+			continue
+		}
+		t, err := time.Parse(time.RFC1123, lastModified)
+		item.uploaded_date = t
+		item.valid = true
+		fmt.Printf("video item - %d, uploaded_date - %v\n", item.thumbnail_id, item.uploaded_date)
+
+		/* Persist upload_date into database */
+		tx, _ := db.Begin()
+		stmt, _ := tx.Prepare("update VideoListTable set upload_date=?  where thumbnail_id=?")
+		_, err = stmt.Exec(item.uploaded_date.Format("2006-01-02 15:04:05"), item.thumbnail_id)
+		if err != nil {
+			fmt.Println(err)
+			tx.Rollback()
+			continue
+		}
+
+		tx.Commit()
+
+		fmt.Printf("persist video item %d done\n", item.thumbnail_id)
+	}
+}
+
+/* Retrive video uploaded date using timestamp from corresponding thumbnail file */
 func (parser *nineOneParser) identifyVideoUploadedDate() {
 	var fileMap map[int]time.Time
 
@@ -889,7 +965,7 @@ func (parser *nineOneParser) datasetPersist() {
 			item.Title, item.Thumbnail.ImgSource, item.Thumbnail.ImgID,
 			item.Author, item.VideoTime.String())
 		if err == nil {
-			fmt.Printf("title - %s, viewkey - %s\n", item.Title, item.ViewKey)
+			fmt.Printf("title - %s, author - %s\n", item.Title, item.Author)
 			newlyAdded++
 		}
 		return true
@@ -980,14 +1056,33 @@ func (parser *nineOneParser) decode(infoStr string) (*string, *string) {
 		b.WriteByte(byte(integerCh))
 	}
 
+	/**
+	 * unescaped may looks like:
+	 * - Case 1)
+	 * <source src='https://ccn.91p52.com//m3u8/459666/459666.m3u8?st=TM6j903f8X4G4lu2lkxyMQ&e=1619197640' type='application/x-mpegURL'>
+	 * - Case 2)
+	 * <source src='https://fdc.91p49.com/m3u8/459666/459666.m3u8' type='application/x-mpegURL'>
+	 * notice that the former url doesn't have http get parameters!!
+	 */
 	unescaped := b.String()
 	start = strings.Index(unescaped, "src='") + len("src='")
 	end = strings.Index(unescaped[start:], "'")
 	srcWithParams := unescaped[start : start+end]
 	questionMarkPos := strings.Index(srcWithParams, "?")
-	httpGetSrc := srcWithParams[:questionMarkPos]
-	slash := strings.LastIndex(httpGetSrc, "/")
-	name := httpGetSrc[slash+1:]
+	var name string
+
+	if questionMarkPos == -1 {
+		/* Case 2), in case of no http get parameters */
+		singleQuoteMarkPos := strings.Index(srcWithParams, "'")
+		httpGetSrc := srcWithParams[:singleQuoteMarkPos]
+		slash := strings.LastIndex(httpGetSrc, "/")
+		name = httpGetSrc[slash+1:]
+	} else {
+		/* Case 1) */
+		httpGetSrc := srcWithParams[:questionMarkPos]
+		slash := strings.LastIndex(httpGetSrc, "/")
+		name = httpGetSrc[slash+1:]
+	}
 
 	return &name, &srcWithParams
 }
@@ -1030,7 +1125,7 @@ func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, er
 	return fetcher.cookies, nil
 }
 
-func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, error) {
+func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string, error) {
 	cfg := &tls.Config{
 		MinVersion:               tls.VersionTLS12,
 		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
@@ -1057,7 +1152,7 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, error) 
 
 	resp, err := client.Head(url)
 	if err != nil {
-		return -1, err
+		return -1, "", err
 	}
 
 	defer resp.Body.Close()
@@ -1065,11 +1160,93 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, error) 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Println(resp.Status)
 		err = fmt.Errorf("http status code - %s\n", resp.StatusCode)
-		return -1, err
+		return -1, "", err
 	}
 
 	length, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-	return length, nil
+	lastModifiedTime := resp.Header.Get("Last-Modified")
+	return length, lastModifiedTime, nil
+}
+
+func (fetcher *nineOneFetcher) wget(url string, outputFile string) error {
+	var resp *http.Response
+	var reader io.ReadCloser
+
+	cfg := &tls.Config{
+		MinVersion:               tls.VersionTLS12,
+		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+		PreferServerCipherSuites: true,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+		},
+	}
+
+	tr := &http.Transport{
+		MaxIdleConns:       10,
+		IdleConnTimeout:    60 * time.Second,
+		DisableCompression: true,
+		TLSClientConfig:    cfg,
+	}
+
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   120 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("User-Agent", fetcher.userAgent)
+	req.Header.Add("Accept-Encoding", "gzip")
+
+	resp, err = client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != 200 {
+		err = errors.New(url + "resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	// contentLength, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+	lastModified := resp.Header.Get("Last-Modified")
+	t, err := time.Parse(time.RFC1123, lastModified)
+	keepFileTimestamp := true
+	if err != nil {
+		keepFileTimestamp = false
+	}
+
+	switch resp.Header.Get("Content-Encoding") {
+	case "gzip":
+		reader, err = gzip.NewReader(resp.Body)
+		defer reader.Close()
+	default:
+		reader = resp.Body
+	}
+
+	f, err := os.OpenFile(outputFile, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+
+	if _, err = io.Copy(f, reader); err != nil {
+		return err
+	}
+
+	f.Close()
+	if keepFileTimestamp {
+		os.Chtimes(outputFile, t, t)
+	}
+
+	return nil
 }
 
 func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
@@ -1116,8 +1293,7 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 		reader = resp.Body
 	}
 
-	body, err = ioutil.ReadAll(reader)
-	if err != nil {
+	if body, err = ioutil.ReadAll(reader); err != nil {
 		return nil, err
 	}
 
@@ -1307,7 +1483,6 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 	}
 
 	if strings.Contains(string(content), "Sorry") {
-		//fmt.Printf("Up limit reached, now stop\n")
 		return fmt.Errorf("Up limit reached, now stop")
 	}
 
@@ -1315,11 +1490,6 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 	parser := sniffer.parser
 
 	info, err := parser.extract(string(content))
-	if err != nil {
-		return err
-	}
-
-	length, err := fetcher.queryHttpResourceLength(url)
 	if err != nil {
 		return err
 	}
@@ -1345,23 +1515,11 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string) error {
 
 	filename := videoPartsDescTodoDir + "/" + *name
 
-	cmd := exec.Command("wget", "-O", filename, *src)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
+	if err = fetcher.wget(*src, filename); err != nil {
+		fmt.Printf("Failed to fetch video parts descriptor: %v\n", err)
 	}
 
-	fileInfo, err := os.Stat(filename)
-	if err != nil {
-		return err
-	}
-
-	if int(fileInfo.Size()) < length {
-		return fmt.Errorf("incomplete descriptor")
-	}
-
-	return nil
+	return err
 }
 
 func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
@@ -1487,7 +1645,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoParts
 		for i := 0; i < filePartsCountInteger; i++ {
 			videoPartsNameWithExt := fmt.Sprintf("%s%d.ts", finalFileName, i)
 			urlResource := fmt.Sprintf("%s/%s/%s", videoPartsURLBase, finalFileName, videoPartsNameWithExt)
-			len, err := fetcher.queryHttpResourceLength(urlResource)
+			len, _, err := fetcher.queryHttpResourceLength(urlResource)
 			if err != nil {
 				return err
 			}
