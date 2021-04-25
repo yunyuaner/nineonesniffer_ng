@@ -12,10 +12,12 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1275,16 +1277,66 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 		req.Header.Set("User-Agent", fetcher.userAgent)
 		req.Header.Add("Accept-Encoding", "gzip")
 
-		dialSocksProxy, err := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, proxy.Direct)
-		if err != nil {
-			fmt.Println("Error connecting to proxy:", err)
+		//dialSocksProxy, err := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, proxy.Direct)
+		//if err != nil {
+		//	fmt.Println("Error connecting to proxy:", err)
+		//}
+
+		//tr := &http.Transport{Dial: dialSocksProxy.Dial}
+
+		newClient := func(dialContext DialContext) *http.Client {
+			return &http.Client{
+				Transport: &http.Transport{
+					Proxy:                 http.ProxyFromEnvironment,
+					DialContext:           dialContext,
+					MaxIdleConns:          10,
+					IdleConnTimeout:       60 * time.Second,
+					TLSHandshakeTimeout:   10 * time.Second,
+					ExpectContinueTimeout: 1 * time.Second,
+					MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
+				},
+			}
 		}
 
-		tr := &http.Transport{Dial: dialSocksProxy.Dial}
+		newClientFromEnv := func() (*http.Client, error) {
+			//proxyHost := os.Getenv("PROXY_HOST")
+			proxyHost := "127.0.0.1:9050"
 
-		client := &http.Client{
-			Transport: tr,
-			Timeout:   5 * time.Second,
+			baseDialer := &net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}
+
+			var dialContext DialContext
+
+			if proxyHost != "" {
+				dialSocksProxy, err := proxy.SOCKS5("tcp", proxyHost, nil, baseDialer)
+				if err != nil {
+					return nil, errors.Wrap(err, "Error creating SOCKS5 proxy")
+				}
+
+				if contextDialer, ok := dialSocksProxy.(proxy.ContextDialer); ok {
+					dialContext = contextDialer.DialContext
+				} else {
+					return nil, errors.New("Failed type assertion to DialContext")
+				}
+
+				logger.Debug("Using SOCKS5 proxy for http client", zap.String("host", proxyHost))
+			} else {
+				dialContext = (baseDialer).DialContext
+			}
+
+			httpClient := newClient(dialContext)
+			return httpClient, nil
+		}
+
+		//client := &http.Client{
+		//	Transport: tr,
+		//	Timeout:   5 * time.Second,
+		//}
+
+		if client, err := newClientFromEnv(); err != nil {
+			return nil, err
 		}
 
 		resp, err = client.Do(req)
