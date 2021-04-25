@@ -1264,6 +1264,7 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 			return nil, err
 		}
 	} else {
+		fmt.Println("Using SOCK5 proxy")
 		req, err := http.NewRequest("GET", url, nil)
 
 		for _, c := range fetcher.cookies {
@@ -1281,7 +1282,6 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 
 		tr := &http.Transport{Dial: dialSocksProxy.Dial}
 
-		//client := new(http.Client)
 		client := &http.Client{
 			Transport: tr,
 			Timeout:   5 * time.Second,
