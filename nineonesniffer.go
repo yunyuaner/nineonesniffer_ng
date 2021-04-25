@@ -199,8 +199,8 @@ func (sniffer *NineOneSniffer) Fetch() {
 	sniffer.fetcher.fetchDetailedVideoPages()
 }
 
-func (sniffer *NineOneSniffer) FetchThumbnails() {
-	sniffer.fetcher.fetchThumbnails()
+func (sniffer *NineOneSniffer) FetchThumbnails(script bool) {
+	sniffer.fetcher.fetchThumbnails(script)
 }
 
 func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string, saveToDb bool) {
@@ -1342,7 +1342,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 	return dir, nil
 }
 
-func (fetcher *nineOneFetcher) fetchThumbnails() {
+func (fetcher *nineOneFetcher) fetchThumbnails(script bool) {
 	thumbnailDir := "data/images/base"
 	f, err := os.Open(thumbnailDir)
 	if err != nil {
@@ -1413,12 +1413,14 @@ func (fetcher *nineOneFetcher) fetchThumbnails() {
 
 	thumbnailf.Close()
 
-	if newThumbnailsCount > 0 {
-		cmd := exec.Command("./thumbnails_dl.sh")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Println(err)
+	if !script {
+		if newThumbnailsCount > 0 {
+			cmd := exec.Command("./thumbnails_dl.sh")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Println(err)
+			}
 		}
 	}
 

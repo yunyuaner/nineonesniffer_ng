@@ -18,6 +18,7 @@ var thumbnail bool
 var help bool
 var transcode bool
 var dumpCfg bool
+var script bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
@@ -34,6 +35,7 @@ func initParameters() {
 	flag.StringVar(&dir, "dir", "", "Target directory")
 	flag.BoolVar(&persist, "persist", false, "Persit infomation into database")
 	flag.BoolVar(&thumbnail, "thumbnail", false, "See how many new thumbnails we newly got")
+	flag.BoolVar(&script, "script", false, "Only generate script for downloading thumbnails")
 	flag.BoolVar(&transcode, "transcode", false, "Convert download video files from ts to mp4 format")
 	flag.BoolVar(&help, "help", false, "Show help")
 	flag.BoolVar(&dumpCfg, "dump_cfg", false, "Dump configurations")
@@ -63,7 +65,7 @@ func showHelp(name string) {
 	fmt.Printf("%s%s -mode sync -count num\n", doubleTab, name)
 
 	fmt.Printf("%sDownload thumbnails\n", tab)
-	fmt.Printf("%s%s -mode load -thumbnail\n", doubleTab, name)
+	fmt.Printf("%s%s -mode load -thumbnail -script\n", doubleTab, name)
 
 	fmt.Printf("%sIdentify video uploaded date according to thumbnails\n", tab)
 	fmt.Printf("%s%s -mode identify_date\n", doubleTab, name)
@@ -117,8 +119,7 @@ func main() {
 	case "load":
 		sniffer.Load()
 		if thumbnail {
-			sniffer.FetchThumbnails()
-			//sniffer.IdentifyVideoUploadedDate()
+			sniffer.FetchThumbnails(script)
 		}
 
 	case "identify_date":
