@@ -23,6 +23,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/net/html"
+	"golang.org/x/net/proxy"
 )
 
 const (
@@ -1273,7 +1274,19 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 		req.Header.Set("User-Agent", fetcher.userAgent)
 		req.Header.Add("Accept-Encoding", "gzip")
 
-		client := new(http.Client)
+		dialSocksProxy, err := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, proxy.Direct)
+		if err != nil {
+			fmt.Println("Error connecting to proxy:", err)
+		}
+
+		tr := &http.Transport{Dial: dialSocksProxy.Dial}
+
+		//client := new(http.Client)
+		client := &http.Client{
+			Transport: tr,
+			Timeout:   5 * time.Second,
+		}
+
 		resp, err = client.Do(req)
 
 		if err != nil {
