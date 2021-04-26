@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -24,6 +23,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/pkg/errors"
 	"golang.org/x/net/html"
 	"golang.org/x/net/proxy"
 )
@@ -1266,7 +1266,6 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 			return nil, err
 		}
 	} else {
-		fmt.Println("Using SOCK5 proxy")
 		req, err := http.NewRequest("GET", url, nil)
 
 		for _, c := range fetcher.cookies {
@@ -1277,15 +1276,17 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 		req.Header.Set("User-Agent", fetcher.userAgent)
 		req.Header.Add("Accept-Encoding", "gzip")
 
-		//dialSocksProxy, err := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, proxy.Direct)
-		//if err != nil {
-		//	fmt.Println("Error connecting to proxy:", err)
-		//}
+		newHTTPClient := func() (*http.Client, error) {
+			baseDialer := &net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}
 
-		//tr := &http.Transport{Dial: dialSocksProxy.Dial}
+			dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, baseDialer)
+			contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
+			dialContext := contextDialer.DialContext
 
-		newClient := func(dialContext DialContext) *http.Client {
-			return &http.Client{
+			httpClient := &http.Client{
 				Transport: &http.Transport{
 					Proxy:                 http.ProxyFromEnvironment,
 					DialContext:           dialContext,
@@ -1296,57 +1297,22 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 					MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
 				},
 			}
-		}
 
-		newClientFromEnv := func() (*http.Client, error) {
-			//proxyHost := os.Getenv("PROXY_HOST")
-			proxyHost := "127.0.0.1:9050"
-
-			baseDialer := &net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}
-
-			var dialContext DialContext
-
-			if proxyHost != "" {
-				dialSocksProxy, err := proxy.SOCKS5("tcp", proxyHost, nil, baseDialer)
-				if err != nil {
-					return nil, errors.Wrap(err, "Error creating SOCKS5 proxy")
-				}
-
-				if contextDialer, ok := dialSocksProxy.(proxy.ContextDialer); ok {
-					dialContext = contextDialer.DialContext
-				} else {
-					return nil, errors.New("Failed type assertion to DialContext")
-				}
-
-				logger.Debug("Using SOCKS5 proxy for http client", zap.String("host", proxyHost))
-			} else {
-				dialContext = (baseDialer).DialContext
-			}
-
-			httpClient := newClient(dialContext)
 			return httpClient, nil
 		}
 
-		//client := &http.Client{
-		//	Transport: tr,
-		//	Timeout:   5 * time.Second,
-		//}
-
-		if client, err := newClientFromEnv(); err != nil {
+		client, err := newHTTPClient()
+		if err != nil {
 			return nil, err
 		}
 
 		resp, err = client.Do(req)
-
 		if err != nil {
 			return nil, err
 		}
 
 		if resp.StatusCode != 200 {
-			err = errors.New(url + "resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
+			err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
 			return nil, err
 		}
 	}
@@ -1369,8 +1335,6 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 }
 
 func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
-	var url string
-
 	if _, err := os.Stat(cookieFile); os.IsNotExist(err) {
 		log.Fatal(err)
 	}
@@ -1387,18 +1351,23 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 		return "", err
 	}
 
+	var failCount int
+	var successCount int
 	for i := start; i < count; i++ {
-		url = fmt.Sprintf(baseurl+"%d", i+1)
-		//fmt.Printf("fetch - %s\n", url)
-		fmt.Printf("\r[%4d of %4d] Done", i+1, count)
-
+		url := fmt.Sprintf(baseurl+"%d", i+1)
 		info, err := fetcher.fetchPage(url)
-
-		fileName := fmt.Sprintf(dir+"/%04d.html", i+1)
-
-		err = ioutil.WriteFile(fileName, info, 0644)
 		if err != nil {
-			return "", err
+			failCount += 1
+			fmt.Printf("\rTotal - %4d, Success - %4d, Fail - %4d", count, successCount, failCount)
+		} else {
+			successCount += 1
+			fmt.Printf("\rTotal - %4d, Success - %4d, Fail - %4d", count, successCount, failCount)
+
+			htmlFile := fmt.Sprintf(dir+"/%04d.html", i+1)
+			err = ioutil.WriteFile(htmlFile, info, 0644)
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
 	}
 
