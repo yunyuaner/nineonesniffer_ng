@@ -1255,7 +1255,7 @@ func (fetcher *nineOneFetcher) wget(url string, outputFile string) error {
 	return nil
 }
 
-func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
+func (fetcher *nineOneFetcher) fetchPage(url string, useProxy bool) (body []byte, err error) {
 	var resp *http.Response
 	var reader io.ReadCloser
 
@@ -1301,9 +1301,15 @@ func (fetcher *nineOneFetcher) fetchPage(url string) (body []byte, err error) {
 			return httpClient, nil
 		}
 
-		client, err := newHTTPClient()
-		if err != nil {
-			return nil, err
+		var client *http.Client
+
+		if useProxy {
+			client, err = newHTTPClient()
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			client = &http.Client{}
 		}
 
 		resp, err = client.Do(req)
@@ -1355,7 +1361,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 	var successCount int
 	for i := start; i < count; i++ {
 		url := fmt.Sprintf(baseurl+"%d", i+1)
-		info, err := fetcher.fetchPage(url)
+		info, err := fetcher.fetchPage(url, false)
 		if err != nil {
 			failCount += 1
 			fmt.Printf("\rTotal - %4d, Success - %4d, Fail - %4d", count, successCount, failCount)
@@ -1517,7 +1523,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 		return fmt.Errorf("url shouldn't be empty")
 	}
 
-	content, err := fetcher.fetchPage(url)
+	content, err := fetcher.fetchPage(url, false)
 	if err != nil {
 		return err
 	}
