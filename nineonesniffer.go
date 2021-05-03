@@ -194,8 +194,8 @@ func (sniffer *NineOneSniffer) DumpCfg() {
 	fmt.Printf("baseURL - %s\n", daemonCfg.baseURL)
 }
 
-func (sniffer *NineOneSniffer) Prefetch(count int) (string, error) {
-	return sniffer.fetcher.fetchVideoList(count)
+func (sniffer *NineOneSniffer) Prefetch(count int, useProxy bool) (string, error) {
+	return sniffer.fetcher.fetchVideoList(count, useProxy)
 }
 
 func (sniffer *NineOneSniffer) Fetch() {
@@ -1340,7 +1340,7 @@ func (fetcher *nineOneFetcher) fetchPage(url string, useProxy bool) (body []byte
 	return body, nil
 }
 
-func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
+func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string, error) {
 	if _, err := os.Stat(cookieFile); os.IsNotExist(err) {
 		log.Fatal(err)
 	}
@@ -1361,7 +1361,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int) (string, error) {
 	var successCount int
 	for i := start; i < count; i++ {
 		url := fmt.Sprintf(baseurl+"%d", i+1)
-		info, err := fetcher.fetchPage(url, false)
+		info, err := fetcher.fetchPage(url, useProxy)
 		if err != nil {
 			failCount += 1
 			fmt.Printf("\rTotal - %4d, Success - %4d, Fail - %4d", count, successCount, failCount)

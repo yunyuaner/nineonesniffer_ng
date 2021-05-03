@@ -19,6 +19,7 @@ var help bool
 var transcode bool
 var dumpCfg bool
 var script bool
+var proxy bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
@@ -34,6 +35,7 @@ func initParameters() {
 	flag.StringVar(&url, "url", "", "url of the detailed video page")
 	flag.StringVar(&dir, "dir", "", "Target directory")
 	flag.BoolVar(&persist, "persist", false, "Persit infomation into database")
+	flag.BoolVar(&proxy, "proxy", false, "Use SOCKS5 proxy")
 	flag.BoolVar(&thumbnail, "thumbnail", false, "See how many new thumbnails we newly got")
 	flag.BoolVar(&script, "script", false, "Only generate script for downloading thumbnails")
 	flag.BoolVar(&transcode, "transcode", false, "Convert download video files from ts to mp4 format")
@@ -50,7 +52,7 @@ func showHelp(name string) {
 	fmt.Printf("Usage: %s -mode [prefetch|fetch|parse|dl_desc|dl_video|sync|load|identify_date] [url] [dir] [count] [persist] [thumbnail] [help]\n", name)
 
 	fmt.Printf("%sGet the newest video list\n", tab)
-	fmt.Printf("%s%s -mode prefetch -count num\n", doubleTab, name)
+	fmt.Printf("%s%s -mode prefetch -count num [-proxy]\n", doubleTab, name)
 
 	fmt.Printf("%sParse the newest video list items and persit into datastore\n", tab)
 	fmt.Printf("%s%s -mode parse -dir dirname -persist\n", doubleTab, name)
@@ -62,10 +64,10 @@ func showHelp(name string) {
 	fmt.Printf("%s%s -mode dl_video [-url video_page_url] [-transcode] [-persist]\n", doubleTab, name)
 
 	fmt.Printf("%sSync the lastest video list ( prefetch + parse )\n", tab)
-	fmt.Printf("%s%s -mode sync -count num\n", doubleTab, name)
+	fmt.Printf("%s%s -mode sync -count num [-proxy]\n", doubleTab, name)
 
 	fmt.Printf("%sDownload thumbnails\n", tab)
-	fmt.Printf("%s%s -mode load -thumbnail -script\n", doubleTab, name)
+	fmt.Printf("%s%s -mode load -thumbnail [-script]\n", doubleTab, name)
 
 	fmt.Printf("%sIdentify video uploaded date according to thumbnails\n", tab)
 	fmt.Printf("%s%s -mode identify_date\n", doubleTab, name)
@@ -88,14 +90,14 @@ func main() {
 
 	switch mode {
 	case "prefetch":
-		dirname, err := sniffer.Prefetch(count)
+		dirname, err := sniffer.Prefetch(count, proxy)
 		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Printf("Prefetched pages stored in %s\n", dirname)
 
 	case "sync":
-		dirname, err := sniffer.Prefetch(count)
+		dirname, err := sniffer.Prefetch(count, proxy)
 		if err != nil {
 			log.Fatal(err)
 		}
