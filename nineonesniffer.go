@@ -1352,9 +1352,8 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 
 	now := time.Now()
 	dir := "data/list/" + now.Format("2006-01-02")
-	cmd := exec.Command("mkdir", "-p", dir)
-	if err = cmd.Run(); err != nil {
-		return "", err
+	if _, err := os.Open(dir); os.IsNotExist(err) {
+		os.MkdirAll(dir, 0644)
 	}
 
 	var failCount int
@@ -1634,11 +1633,8 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 					}
 
 					name := "./data/video/video_parts/" + finalFileName + "/" + videoPartName
-					cmd := exec.Command("wget", "--timeout", "60", "-O", name, videoPartURL)
-					//fmt.Printf("Worker #%02d is fetching video part - %s\n", workerID, videoPartName)
-					err = cmd.Run()
 
-					if err != nil {
+					if err = fetcher.wget(videoPartURL, name); err != nil {
 						fmt.Println(err)
 						taskResultChannel <- fmt.Sprintf("Worker #%02d failed to download video part - %s", workerID, videoPartName)
 					} else {
@@ -1660,20 +1656,44 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 	}(filePartsCountInteger, howmanyWorkers)
 
 	/* Merge all the downloaded video parts into one and do transcoding */
-	utilsCatScript := utilsDir + "/cat.sh"
-	var cmd *exec.Cmd
-	if fetcher.sniffer.Transcode {
-		cmd = exec.Command(utilsCatScript, finalFileName, strconv.Itoa(filePartsCountInteger-1), "transcode")
-	} else {
-		cmd = exec.Command(utilsCatScript, finalFileName, strconv.Itoa(filePartsCountInteger-1))
+	os.Remove("./data/video/video_merged/" + finalFileName + ".ts")
+	mergedFile, _ := os.OpenFile("./data/video/video_merged/"+finalFileName+".ts", os.O_CREATE|os.O_WRONLY, 0644)
+	defer mergedFile.Close()
+
+	for i := 0; i < filePartsCountInteger; i++ {
+		filePart := fmt.Sprintf("./data/video/video_parts/%s/%s%d.ts", finalFileName, finalFileName, i)
+		f, err := os.Open(filePart)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		buffer, err := ioutil.ReadAll(f)
+		if err != nil {
+			fmt.Println(err)
+			f.Close()
+			return
+		}
+
+		f.Close()
+
+		if _, err = mergedFile.Write(buffer); err != nil {
+			fmt.Println(err)
+			return
+		}
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println(err)
-	} else {
-		os.Rename("./data/video/m3u8/todo/"+finalFileName+".m3u8", "./data/video/m3u8/done/"+finalFileName+".m3u8")
+
+	os.Rename("./data/video/m3u8/todo/"+finalFileName+".m3u8", "./data/video/m3u8/done/"+finalFileName+".m3u8")
+
+	if fetcher.sniffer.Transcode {
+		var cmd *exec.Cmd
+		cmd = exec.Command("ffmpeg", "-i", "./data/video/video_merged/"+finalFileName+".ts", "-c:v",
+			"h264_qsv", "-c:a", "aac", "-strict", "-2", "./data/video/video_merged/"+finalFileName+".mp4")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+
+		os.Remove("./data/video/video_merged/" + finalFileName + ".ts")
 	}
 }
 
@@ -1788,11 +1808,12 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 
 			//fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName, false)
 			fetcher.fetchVideoPartsByNameWithWorkers(videoPartsDescTodoDir+"/"+descriptorName, baseName)
+			os.Rename(videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
 
-			cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
-			if err = cmd.Run(); err != nil {
-				fmt.Println(err)
-			}
+			//cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
+			//if err = cmd.Run(); err != nil {
+			//	fmt.Println(err)
+			//}
 		}
 	}
 

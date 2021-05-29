@@ -23,7 +23,14 @@ var proxy bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
+const (
+	ffmpegDir = "C:\\Program Files (x86)\\FormatFactory"
+)
+
 func init() {
+	pwd, _ := os.Getwd()
+	os.Setenv("PATH", ffmpegDir+";"+pwd+"\\tools")
+
 	initParameters()
 	sniffer = new(nineonesniffer.NineOneSniffer)
 	sniffer.Init()
@@ -137,8 +144,6 @@ func main() {
 	case "dl_video":
 		if len(url) > 0 {
 			sniffer.FetchVideoPartsDscriptor(url, persist)
-		} else {
-			os.Exit(0)
 		}
 
 		if transcode {
