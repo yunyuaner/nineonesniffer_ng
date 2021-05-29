@@ -137,6 +137,8 @@ func main() {
 	case "dl_video":
 		if len(url) > 0 {
 			sniffer.FetchVideoPartsDscriptor(url, persist)
+		} else {
+			os.Exit(0)
 		}
 
 		if transcode {

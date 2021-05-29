@@ -1777,6 +1777,12 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 	for _, info := range fileInfo {
 		if !info.IsDir() {
 			descriptorName := info.Name()
+			if strings.Contains(descriptorName, ".mp4") {
+				/* Legacy video files do not have descriptor file */
+				os.Rename(videoPartsDescTodoDir+"/"+info.Name(), videoMergedDir+"/"+info.Name())
+				continue
+			}
+
 			baseName := descriptorName[:len(descriptorName)-len(".m3u8")]
 			fmt.Printf("analyze and download file - %s\n", info.Name())
 
