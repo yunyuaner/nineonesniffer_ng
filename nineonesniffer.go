@@ -1282,7 +1282,7 @@ func (fetcher *nineOneFetcher) fetchPage(url string, useProxy bool) (body []byte
 				KeepAlive: 30 * time.Second,
 			}
 
-			dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:9050", nil, baseDialer)
+			dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, baseDialer)
 			contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
 			dialContext := contextDialer.DialContext
 
@@ -1660,6 +1660,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 	mergedFile, _ := os.OpenFile("./data/video/video_merged/"+finalFileName+".ts", os.O_CREATE|os.O_WRONLY, 0644)
 	defer mergedFile.Close()
 
+	/* TODO: Should resolve the case when some of the video parts are missing */
 	for i := 0; i < filePartsCountInteger; i++ {
 		filePart := fmt.Sprintf("./data/video/video_parts/%s/%s%d.ts", finalFileName, finalFileName, i)
 		f, err := os.Open(filePart)
@@ -1691,12 +1692,35 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 			"h264_qsv", "-c:a", "aac", "-strict", "-2", "./data/video/video_merged/"+finalFileName+".mp4")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		cmd.Run()
+		err := cmd.Run()
+		if err != nil {
+			fmt.Println(err)
+		}
 
-		os.Remove("./data/video/video_merged/" + finalFileName + ".ts")
+		/**
+		 * It seems ffmpeg doesn't exit gracefully, and the ts file is still occupied thus can't be removed,
+		 * to make a work-around, kill ffmpeg.exe process before removing it.
+		 */
+		kill := exec.Command("taskkill", "/T", "/F", "/IM", "ffmpeg.exe")
+		kill.Env = []string{"PATH=C:\\Program Files (x86)\\FormatFactory"}
+		if err := kill.Run(); err != nil {
+			/* Error prompt: executable file not found in %PATH% */
+			fmt.Println(err)
+		} else {
+			if err := os.Remove("./data/video/video_merged/" + finalFileName + ".ts"); err != nil {
+				fmt.Println(err)
+			}
+		}
+
+		if err := os.RemoveAll("./data/video/video_parts/" + finalFileName); err != nil {
+			fmt.Println(err)
+		}
 	}
 }
 
+/**
+ * Obsolete, will delete later!
+ */
 func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoPartsBaseName string, reliable bool) error {
 	utilsGetScript := utilsDir + "/get.sh"
 	utilsCatScript := utilsDir + "/cat.sh"
