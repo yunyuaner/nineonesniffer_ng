@@ -173,8 +173,8 @@ func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge(useProxy bool) {
 	}
 }
 
-func (sniffer *NineOneSniffer) RefreshDataset(dirname string) {
-	sniffer.parser.refreshDataset(dirname)
+func (sniffer *NineOneSniffer) RefreshDataset(dirname string, keep bool) {
+	sniffer.parser.refreshDataset(dirname, keep)
 	fmt.Printf("Got %d items\n", sniffer.datasetSize())
 }
 
@@ -806,7 +806,7 @@ func (parser *nineOneParser) identifyVideoUploadedDate() {
 	fmt.Printf("\nDone\n")
 }
 
-func (parser *nineOneParser) refreshDataset(dirname string) (int, error) {
+func (parser *nineOneParser) refreshDataset(dirname string, keep bool) (int, error) {
 	f, err := os.Open(dirname)
 	if err != nil {
 		return 0, err
@@ -840,6 +840,10 @@ func (parser *nineOneParser) refreshDataset(dirname string) (int, error) {
 				parser.sniffer.datasetAppend(item.ViewKey, item)
 			}
 		}
+	}
+
+	if !keep {
+		os.RemoveAll(dirname)
 	}
 
 	return len(allFiles), nil
@@ -1333,24 +1337,78 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 		os.MkdirAll(dir, 0644)
 	}
 
+	var concurrentRtnCount int
+	doneChannel := make(chan struct{})
+	indexChannel := make(chan int)
+	observerChannel := make(chan int)
+
 	var failCount int
 	var successCount int
-	for i := start; i < count; i++ {
-		url := fmt.Sprintf(baseurl+"%d", i+1)
-		info, err := fetcher.fetchPage(url, useProxy)
-		if err != nil {
-			failCount += 1
-			fmt.Printf("\rTotal - %4d, Success - %4d, Fail - %4d", count, successCount, failCount)
-		} else {
-			successCount += 1
-			fmt.Printf("\rTotal - %4d, Success - %4d, Fail - %4d", count, successCount, failCount)
 
-			htmlFile := fmt.Sprintf(dir+"/%04d.html", i+1)
-			err = ioutil.WriteFile(htmlFile, info, 0644)
-			if err != nil {
-				log.Fatal(err)
+	var failIndexList []int
+
+	fetchRoutine := func(useProxy bool) {
+		for {
+			index, ok := <-indexChannel
+			if !ok {
+				doneChannel <- struct{}{}
+				break
+			}
+
+			src := fmt.Sprintf(baseurl+"%d", index+1)
+
+			if info, err := fetcher.fetchPage(src, useProxy); err != nil {
+				failCount += 1
+				failIndexList = append(failIndexList, index)
+			} else {
+				successCount += 1
+				observerChannel <- index
+				htmlFile := fmt.Sprintf(dir+"/%04d.html", index+1)
+				err = ioutil.WriteFile(htmlFile, info, 0644)
+				if err != nil {
+					log.Fatal(err)
+				}
 			}
 		}
+	}
+
+	if count <= 100 {
+		concurrentRtnCount = 5
+	} else {
+		concurrentRtnCount = 8
+	}
+
+	for i := 0; i < concurrentRtnCount; i++ {
+		go fetchRoutine(useProxy)
+	}
+
+	obverserRoutine := func() {
+		for {
+			if successCount+failCount == count {
+				break
+			}
+			index := <-observerChannel
+			fmt.Printf("\rLatest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d", index, count, successCount, failCount)
+		}
+	}
+
+	go obverserRoutine()
+
+	for i := start; i < count; i++ {
+		indexChannel <- i
+	}
+
+	/* Retry failed items if any */
+	if len(failIndexList) > 0 {
+		for _, index := range failIndexList {
+			indexChannel <- index
+		}
+	}
+
+	close(indexChannel)
+
+	for i := 0; i < concurrentRtnCount; i++ {
+		<-doneChannel
 	}
 
 	fmt.Printf("\n")

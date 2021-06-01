@@ -20,6 +20,7 @@ var transcode bool
 var dumpCfg bool
 var script bool
 var proxy bool
+var keep bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
@@ -42,6 +43,7 @@ func initParameters() {
 	flag.StringVar(&url, "url", "", "url of the detailed video page")
 	flag.StringVar(&dir, "dir", "", "Target directory")
 	flag.BoolVar(&persist, "persist", false, "Persit infomation into database")
+	flag.BoolVar(&keep, "keep", false, "Keep fetched web page data")
 	flag.BoolVar(&proxy, "proxy", false, "Use SOCKS5 proxy")
 	flag.BoolVar(&thumbnail, "thumbnail", false, "See how many new thumbnails we newly got")
 	flag.BoolVar(&script, "script", false, "Only generate script for downloading thumbnails")
@@ -71,7 +73,7 @@ func showHelp(name string) {
 	fmt.Printf("%s%s -mode dl_video [-url video_page_url] [-transcode] [-persist]\n", doubleTab, name)
 
 	fmt.Printf("%sSync the lastest video list ( prefetch + parse )\n", tab)
-	fmt.Printf("%s%s -mode sync -count num [-proxy]\n", doubleTab, name)
+	fmt.Printf("%s%s -mode sync -count num [-proxy] [-keep]\n", doubleTab, name)
 
 	fmt.Printf("%sDownload thumbnails\n", tab)
 	fmt.Printf("%s%s -mode load -thumbnail [-script]\n", doubleTab, name)
@@ -108,7 +110,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		sniffer.RefreshDataset(dirname)
+		sniffer.RefreshDataset(dirname, keep)
 		sniffer.Persist()
 
 	case "parse":
@@ -116,7 +118,7 @@ func main() {
 			showHelp(os.Args[0])
 			os.Exit(0)
 		}
-		sniffer.RefreshDataset(dir)
+		sniffer.RefreshDataset(dir, true)
 
 		if persist {
 			sniffer.Persist()
