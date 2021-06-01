@@ -161,14 +161,14 @@ func (sniffer *NineOneSniffer) FetchThumbnails(script bool) {
 	sniffer.fetcher.fetchThumbnails(script)
 }
 
-func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string, saveToDb bool) {
-	if err := sniffer.fetcher.fetchVideoPartsDescriptor(url, saveToDb); err != nil {
+func (sniffer *NineOneSniffer) FetchVideoPartsDscriptor(url string, saveToDb bool, useProxy bool) {
+	if err := sniffer.fetcher.fetchVideoPartsDescriptor(url, saveToDb, useProxy); err != nil {
 		fmt.Println(err)
 	}
 }
 
-func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge() {
-	if err := sniffer.fetcher.fetchVideoPartsAndMerge(); err != nil {
+func (sniffer *NineOneSniffer) FetchVideoPartsAndMerge(useProxy bool) {
+	if err := sniffer.fetcher.fetchVideoPartsAndMerge(useProxy); err != nil {
 		fmt.Println(err)
 	}
 }
@@ -196,7 +196,7 @@ func (sniffer *NineOneSniffer) Load() {
 }
 
 /* Fetch the most recent 100 videos */
-func (sniffer *NineOneSniffer) WhatIsNew() {
+func (sniffer *NineOneSniffer) WhatIsNew(useProxy bool) {
 	db, _ := sql.Open("sqlite3", "nineone.db")
 
 	defer db.Close()
@@ -227,7 +227,7 @@ func (sniffer *NineOneSniffer) WhatIsNew() {
 			continue
 		}
 
-		err = sniffer.fetcher.fetchVideoPartsDescriptor(detailedVideoPageURL, false)
+		err = sniffer.fetcher.fetchVideoPartsDescriptor(detailedVideoPageURL, false, useProxy)
 		if err != nil {
 			fmt.Println(err)
 			break
@@ -1119,33 +1119,35 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string,
 	return length, lastModifiedTime, nil
 }
 
-func (fetcher *nineOneFetcher) wget(url string, outputFile string) error {
+func (fetcher *nineOneFetcher) wget(url string, outputFile string, useProxy bool) error {
 	var resp *http.Response
 	var reader io.ReadCloser
 
-	cfg := &tls.Config{
-		MinVersion:               tls.VersionTLS12,
-		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
-		PreferServerCipherSuites: true,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-		},
-	}
+	// cfg := &tls.Config{
+	// 	MinVersion:               tls.VersionTLS12,
+	// 	CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+	// 	PreferServerCipherSuites: true,
+	// 	CipherSuites: []uint16{
+	// 		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+	// 		tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+	// 		tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+	// 		tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+	// 	},
+	// }
 
-	tr := &http.Transport{
-		MaxIdleConns:       10,
-		IdleConnTimeout:    60 * time.Second,
-		DisableCompression: true,
-		TLSClientConfig:    cfg,
-	}
+	// tr := &http.Transport{
+	// 	MaxIdleConns:       10,
+	// 	IdleConnTimeout:    60 * time.Second,
+	// 	DisableCompression: true,
+	// 	TLSClientConfig:    cfg,
+	// }
 
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   120 * time.Second,
-	}
+	// client := &http.Client{
+	// 	Transport: tr,
+	// 	Timeout:   120 * time.Second,
+	// }
+
+	client := fetcher.newHTTPSClient(useProxy)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -1200,72 +1202,102 @@ func (fetcher *nineOneFetcher) wget(url string, outputFile string) error {
 	return nil
 }
 
+func (fetcher *nineOneFetcher) newHTTPClient(useProxy bool) *http.Client {
+	if useProxy {
+		baseDialer := &net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+
+		dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, baseDialer)
+		contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
+		dialContext := contextDialer.DialContext
+
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           dialContext,
+				MaxIdleConns:          10,
+				IdleConnTimeout:       60 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+				MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
+			},
+		}
+
+		return httpClient
+	} else {
+		return &http.Client{}
+	}
+}
+
+func (fetcher *nineOneFetcher) newHTTPSClient(useProxy bool) *http.Client {
+	cfg := &tls.Config{
+		MinVersion:               tls.VersionTLS12,
+		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+		PreferServerCipherSuites: true,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+		},
+	}
+
+	tr := &http.Transport{
+		MaxIdleConns:       10,
+		IdleConnTimeout:    60 * time.Second,
+		DisableCompression: true,
+		TLSClientConfig:    cfg,
+	}
+
+	if useProxy {
+		baseDialer := &net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+
+		dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, baseDialer)
+		contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
+		dialContext := contextDialer.DialContext
+		tr.Proxy = http.ProxyFromEnvironment
+		tr.DialContext = dialContext
+	}
+
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   120 * time.Second,
+	}
+
+	return client
+}
+
 func (fetcher *nineOneFetcher) fetchPage(url string, useProxy bool) (body []byte, err error) {
 	var resp *http.Response
 	var reader io.ReadCloser
 
-	if fetcher.cookies == nil {
-		resp, err = http.Get(url)
-		if err != nil {
-			log.Printf("Fetching %s failed - %v\n", url, err)
-			return nil, err
-		}
-	} else {
-		req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, nil)
 
+	if fetcher.cookies != nil {
 		for _, c := range fetcher.cookies {
 			cookie := c
 			req.AddCookie(cookie)
 		}
+	}
 
-		req.Header.Set("User-Agent", fetcher.userAgent)
-		req.Header.Add("Accept-Encoding", "gzip")
+	req.Header.Set("User-Agent", fetcher.userAgent)
+	req.Header.Add("Accept-Encoding", "gzip")
 
-		newHTTPClient := func() (*http.Client, error) {
-			baseDialer := &net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}
+	client := fetcher.newHTTPClient(useProxy)
 
-			dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, baseDialer)
-			contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
-			dialContext := contextDialer.DialContext
+	resp, err = client.Do(req)
+	if err != nil {
+		return nil, err
+	}
 
-			httpClient := &http.Client{
-				Transport: &http.Transport{
-					Proxy:                 http.ProxyFromEnvironment,
-					DialContext:           dialContext,
-					MaxIdleConns:          10,
-					IdleConnTimeout:       60 * time.Second,
-					TLSHandshakeTimeout:   10 * time.Second,
-					ExpectContinueTimeout: 1 * time.Second,
-					MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
-				},
-			}
-
-			return httpClient, nil
-		}
-
-		var client *http.Client
-
-		if useProxy {
-			client, err = newHTTPClient()
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			client = &http.Client{}
-		}
-
-		resp, err = client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-
-		if resp.StatusCode != 200 {
-			err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
-			return nil, err
-		}
+	if resp.StatusCode != 200 {
+		err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
+		return nil, err
 	}
 
 	defer resp.Body.Close()
@@ -1462,12 +1494,12 @@ func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 	}
 }
 
-func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool) error {
+func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool, useProxy bool) error {
 	if len(url) == 0 {
 		return fmt.Errorf("url shouldn't be empty")
 	}
 
-	content, err := fetcher.fetchPage(url, false)
+	content, err := fetcher.fetchPage(url, useProxy)
 	if err != nil {
 		return err
 	}
@@ -1530,7 +1562,9 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 
 	filename := videoPartsDescTodoDir + "/" + *name
 
-	if err = fetcher.wget(*src, filename); err != nil {
+	// fmt.Printf("src - %s, filename - %s, useProxy - %v\n", *src, filename, useProxy)
+
+	if err = fetcher.wget(*src, filename, useProxy); err != nil {
 		fmt.Printf("Failed to fetch video parts descriptor: %v\n", err)
 	}
 
@@ -1538,7 +1572,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 }
 
 func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
-	videoPartsBaseName string) {
+	videoPartsBaseName string, useProxy bool) {
 
 	sniffer := *fetcher.sniffer
 	parser := sniffer.parser
@@ -1579,7 +1613,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 					name := "./data/video/video_parts/" + finalFileName + "/" + videoPartName
 
-					if err = fetcher.wget(videoPartURL, name); err != nil {
+					if err = fetcher.wget(videoPartURL, name, useProxy); err != nil {
 						fmt.Println(err)
 						taskResultChannel <- fmt.Sprintf("Worker #%02d failed to download video part - %s", workerID, videoPartName)
 					} else {
@@ -1663,7 +1697,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 	}
 }
 
-func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
+func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge(useProxy bool) error {
 	f, err := os.Open(videoPartsDescTodoDir)
 	if err != nil {
 		log.Fatal(err)
@@ -1683,7 +1717,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
 			fmt.Printf("analyze and download file - %s\n", info.Name())
 
 			//fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName, false)
-			fetcher.fetchVideoPartsByNameWithWorkers(videoPartsDescTodoDir+"/"+descriptorName, baseName)
+			fetcher.fetchVideoPartsByNameWithWorkers(videoPartsDescTodoDir+"/"+descriptorName, baseName, useProxy)
 			os.Rename(videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
 
 			//cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())

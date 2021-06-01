@@ -123,7 +123,7 @@ func main() {
 		}
 
 	case "fetch":
-		sniffer.WhatIsNew()
+		sniffer.WhatIsNew(proxy)
 
 	case "load":
 		sniffer.Load()
@@ -139,17 +139,17 @@ func main() {
 			showHelp(os.Args[0])
 			os.Exit(0)
 		}
-		sniffer.FetchVideoPartsDscriptor(url, persist)
+		sniffer.FetchVideoPartsDscriptor(url, persist, proxy)
 
 	case "dl_video":
 		if len(url) > 0 {
-			sniffer.FetchVideoPartsDscriptor(url, persist)
+			sniffer.FetchVideoPartsDscriptor(url, persist, proxy)
 		}
 
 		if transcode {
 			sniffer.Transcode = true
 		}
-		sniffer.FetchVideoPartsAndMerge()
+		sniffer.FetchVideoPartsAndMerge(proxy)
 
 	default:
 		showHelp(os.Args[0])
