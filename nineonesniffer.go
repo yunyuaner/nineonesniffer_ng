@@ -1658,7 +1658,6 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 	/* Merge all the downloaded video parts into one and do transcoding */
 	os.Remove("./data/video/video_merged/" + finalFileName + ".ts")
 	mergedFile, _ := os.OpenFile("./data/video/video_merged/"+finalFileName+".ts", os.O_CREATE|os.O_WRONLY, 0644)
-	defer mergedFile.Close()
 
 	/* TODO: Should resolve the case when some of the video parts are missing */
 	for i := 0; i < filePartsCountInteger; i++ {
@@ -1684,6 +1683,8 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 		}
 	}
 
+	mergedFile.Close()
+
 	os.Rename("./data/video/m3u8/todo/"+finalFileName+".m3u8", "./data/video/m3u8/done/"+finalFileName+".m3u8")
 
 	if fetcher.sniffer.Transcode {
@@ -1697,19 +1698,18 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 			fmt.Println(err)
 		}
 
-		/**
-		 * It seems ffmpeg doesn't exit gracefully, and the ts file is still occupied thus can't be removed,
-		 * to make a work-around, kill ffmpeg.exe process before removing it.
-		 */
 		kill := exec.Command("taskkill", "/T", "/F", "/IM", "ffmpeg.exe")
-		kill.Env = []string{"PATH=C:\\Program Files (x86)\\FormatFactory"}
-		if err := kill.Run(); err != nil {
-			/* Error prompt: executable file not found in %PATH% */
+		kill.Env = []string{"PATH=\"C:\\Program Files (x86)\\FormatFactory\""}
+		kill.Run()
+
+		finalFileNameWithPath := "./data/video/video_merged/" + finalFileName + ".ts"
+
+		if err := os.Remove("./data/video/video_merged/" + finalFileName + ".ts"); err != nil {
 			fmt.Println(err)
-		} else {
-			if err := os.Remove("./data/video/video_merged/" + finalFileName + ".ts"); err != nil {
-				fmt.Println(err)
-			}
+
+			cmd = exec.Command("cmd.exe", "/C", "del", finalFileNameWithPath)
+			cmd.Run()
+
 		}
 
 		if err := os.RemoveAll("./data/video/video_parts/" + finalFileName); err != nil {
