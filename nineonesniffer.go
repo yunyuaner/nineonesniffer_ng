@@ -99,51 +99,6 @@ type VideoItem struct {
 
 type VideoDataSet map[string]*VideoItem
 
-/*
- * To be obsolete
- */
-func (ds *VideoDataSet) add(key string, item *VideoItem) *VideoDataSet {
-	(*ds)[key] = item
-	return ds
-}
-
-/*
- * To be obsolete
- */
-func (ds *VideoDataSet) remove(item *VideoItem) *VideoDataSet {
-	delete(*ds, item.ViewKey)
-	return ds
-}
-
-/*
- * To be obsolete
- */
-func (ds *VideoDataSet) has(viewkay string) bool {
-	_, ok := (*ds)[viewkay]
-	return ok
-}
-
-/*
- * To be obsolete
- */
-func (ds *VideoDataSet) get(viewkey string) (*VideoItem, bool) {
-	item, ok := (*ds)[viewkey]
-	return item, ok
-}
-
-/*
- * To be obsolete
- */
-func (ds *VideoDataSet) iterate(visitor func(item *VideoItem) bool) {
-	for _, info := range *ds {
-		if ret := visitor(info); !ret {
-			return
-		}
-	}
-}
-
-//var vds VideoDataSet
-
 type NineOneSniffer struct {
 	fetcher   nineOneFetcher
 	parser    nineOneParser
@@ -852,10 +807,6 @@ func (parser *nineOneParser) identifyVideoUploadedDate() {
 }
 
 func (parser *nineOneParser) refreshDataset(dirname string) (int, error) {
-	//const dirname = "data/list/base"
-	//sniffer := *parser.sniffer
-	//dataset := &sniffer.ds
-
 	f, err := os.Open(dirname)
 	if err != nil {
 		return 0, err
@@ -880,14 +831,11 @@ func (parser *nineOneParser) refreshDataset(dirname string) (int, error) {
 	sort.Strings(allFiles)
 
 	for _, file := range allFiles {
-		//fmt.Println("process file - ", file)
 		items, err := parser.parseVideoList(file)
-		//fmt.Printf("items - %d\n", len(items))
 		if err != nil {
 			return 0, err
 		}
 		for _, item := range items {
-			//fmt.Println(item.Title)
 			if !parser.sniffer.datasetHas(item.ViewKey) {
 				parser.sniffer.datasetAppend(item.ViewKey, item)
 			}
@@ -939,8 +887,6 @@ func (parser *nineOneParser) scriptGenerate() (int, error) {
 		return true
 	}
 
-	//sniffer := *parser.sniffer
-	//sniffer.ds.iterate(visitor)
 	parser.sniffer.datasetIterate(visitor)
 
 	return len(files), nil
@@ -961,7 +907,6 @@ func (parser *nineOneParser) datasetPersist() {
 
 	var newlyAdded int
 
-	//sniffer := *parser.sniffer
 	parser.sniffer.datasetIterate(func(item *VideoItem) bool {
 		//fmt.Printf("title - %s, author - %s, duration - %s\n", item.Title, item.Author, item.VideoTime.String())
 		err = videoListTableInsert(db, item.ViewKey, item.VideoDetailedPageURL,
@@ -1716,99 +1661,6 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 			fmt.Println(err)
 		}
 	}
-}
-
-/**
- * Obsolete, will delete later!
- */
-func (fetcher *nineOneFetcher) fetchVideoPartsByName(filename string, videoPartsBaseName string, reliable bool) error {
-	utilsGetScript := utilsDir + "/get.sh"
-	utilsCatScript := utilsDir + "/cat.sh"
-
-	file, err := os.Open(filename)
-	if os.IsNotExist(err) {
-		log.Fatal(err)
-	}
-
-	defer file.Close()
-
-	fileContent, _ := ioutil.ReadAll(file)
-	fileContentStr := string(fileContent)
-
-	r := regexp.MustCompile(`[0-9]*\.ts`)
-	videoParts := r.FindAllString(fileContentStr, -1)
-	videoPartsLengthMap := make(map[int]int)
-
-	var videoPartsWithoutSuffix []int
-	for _, part := range videoParts {
-		val, _ := strconv.Atoi(part[:len(part)-3])
-		videoPartsWithoutSuffix = append(videoPartsWithoutSuffix, val)
-	}
-
-	sort.Ints(videoPartsWithoutSuffix)
-	finalFileName := videoPartsBaseName
-	lastVideoPartName := strconv.Itoa(videoPartsWithoutSuffix[len(videoPartsWithoutSuffix)-1])
-	n := strings.Index(lastVideoPartName, finalFileName)
-	filePartsCount := lastVideoPartName[n+len(finalFileName):]
-
-	filePartsCountInteger, _ := strconv.Atoi(filePartsCount)
-
-	/* @finalFileName and @filePartsCountInteger are required in the next stage */
-
-	/* First, query each video parts file length from server */
-	if reliable {
-		for i := 0; i < filePartsCountInteger; i++ {
-			videoPartsNameWithExt := fmt.Sprintf("%s%d.ts", finalFileName, i)
-			urlResource := fmt.Sprintf("%s/%s/%s", videoPartsURLBase, finalFileName, videoPartsNameWithExt)
-			len, _, err := fetcher.queryHttpResourceLength(urlResource)
-			if err != nil {
-				return err
-			}
-			key, _ := strconv.Atoi(fmt.Sprintf("%s%d", finalFileName, i))
-			videoPartsLengthMap[key] = len
-		}
-	}
-
-	/* Retrive the video parts one by one */
-	cmd := exec.Command(utilsGetScript, finalFileName, filePartsCount)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		return err
-	}
-
-	/* TODO: Verify that all the video file parts are downloaded completely */
-	if reliable {
-		dirOfVideoParts := "data/video/video_parts/"
-		for k, v := range videoPartsLengthMap {
-			videoPartName := fmt.Sprintf("%d.ts", k)
-			file := fmt.Sprintf("%s/%s", dirOfVideoParts, videoPartName)
-			fmt.Printf("check existence of video part - %s\n", videoPartName)
-
-			f, err := os.Open(file)
-			if os.IsNotExist(err) {
-				/* TODO: Should call download method again */
-				fmt.Println("Should call download method again")
-			} else if info, _ := f.Stat(); int(info.Size()) < v {
-				/* TODO: Should call download method again */
-				fmt.Println("Should call download method again")
-			}
-
-			f.Close()
-		}
-	}
-
-	/* Merge all the downloaded video parts into one and do transcoding */
-	cmd = exec.Command(utilsCatScript, finalFileName, filePartsCount)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge() error {
