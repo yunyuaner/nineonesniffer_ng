@@ -1,6 +1,6 @@
-all: sniffer 
+all: sniffer
 
-sniffer: sniffer.go ../nineonesniffer.go
+sniffer: sniffer.go ../nineonesniffer.go ../configmgr.go
 	go build $<
 
 clean:

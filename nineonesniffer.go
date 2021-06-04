@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"crypto/tls"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -27,58 +26,6 @@ import (
 	"golang.org/x/net/html"
 	"golang.org/x/net/proxy"
 )
-
-const (
-	defaultVideoItemCount = 5000
-	createTableStmt       = `create table testTable if not exist (
-								id integer primary key autoincrement,
-								username text, 
-								surname text,
-								age Integer,
-								university text)`
-	dir                    = "data/view_video"
-	baseurl                = "http://www.91porn.com/v.php?next=watch&page="
-	mozillaUserAgentString = "Mozilla/5.0 (platform; rv:17.0) Gecko/20100101 SeaMonkey/2.7.1"
-	start                  = 0
-	cookieFile             = "./configs/cookies.txt"
-	videoPartsDir          = "data/video/video_parts"
-	videoMergedDir         = "data/video/video_merged"
-	videoPartsDescTodoDir  = "data/video/m3u8/todo"
-	videoPartsDescDoneDir  = "data/video/m3u8/done"
-	videoPartsURLBase      = "https://cdn.91p07.com//m3u8"
-	utilsDir               = "../utils"
-)
-
-type nineOneSnifferDaemonCfg struct {
-	baseURL                  string `json:"base_url"`
-	videoPartsURLBase        string `json:"video_parts_url_base"`
-	userAgent                string `json:"user_agent"`
-	configBaseDir            string `json:"config_base_dir"`
-	cookieFile               string `json:"cookie_file"`
-	thumbnailHttpHeadersFile string `json:"thumbnail_http_headers_file"`
-	dataBaseDir              string `json:"data_base_dir"`
-	videoPartsDir            string `json:"video_parts_dir"`
-	videoMergedDir           string `json:"video_merged_dir"`
-	videoPartsDescTodoDir    string `json:"video_parts_desc_todo_dir"`
-	videoPartsDescDoneDir    string `json:"video_parts_desc_done_dir"`
-	videoListBaseDir         string `json:"video_list_base_dir"`
-	thumbnailBaseDir         string `json:"thumbnail_base_dir"`
-	thumbnailNewDir          string `json:"thumbnail_new_dir"`
-	utilsDir                 string `json:"utils_dir"`
-	tempDir                  string `json:"temp_dir"`
-}
-
-type nineOneSnifferWebGUICfg struct {
-}
-
-type nineOneSnifferCliCfg struct {
-}
-
-type nineOneSnifferCfg struct {
-	snifferDaemon nineOneSnifferDaemonCfg `json:"sniffer_daemon"`
-	webgui        nineOneSnifferWebGUICfg `json:"webgui"`
-	cli           nineOneSnifferCliCfg    `json:"cli"`
-}
 
 type ImageItem struct {
 	ImgID     int
@@ -104,7 +51,7 @@ type NineOneSniffer struct {
 	parser    nineOneParser
 	ds        VideoDataSet
 	Transcode bool
-	cfg       nineOneSnifferCfg
+	confmgr   *NineOneConfManager
 }
 
 type nineOneFetcher struct {
@@ -118,35 +65,43 @@ type nineOneParser struct {
 }
 
 func (sniffer *NineOneSniffer) Init() {
-	f, err := os.Open("./configs/NineOneSniffer.json")
+	workDir, err := os.Getwd()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(workDir)
 	}
 
-	defer f.Close()
+	sniffer.confmgr = new(NineOneConfManager)
+	configFile := workDir + "\\configs\\NineOneSniffer.conf"
+	sniffer.confmgr.Start(configFile)
 
-	info, err := ioutil.ReadAll(f)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	cfg := &((*sniffer).cfg)
-
-	err = json.Unmarshal(info, cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
+	sniffer.prerequisite()
 
 	sniffer.fetcher.sniffer = sniffer
 	sniffer.parser.sniffer = sniffer
-	sniffer.fetcher.userAgent = mozillaUserAgentString
+	sniffer.fetcher.userAgent = sniffer.confmgr.config.userAgent
 	sniffer.ds = make(map[string]*VideoItem)
 	sniffer.Transcode = false
 }
 
-func (sniffer *NineOneSniffer) DumpCfg() {
-	daemonCfg := &((*sniffer).cfg.snifferDaemon)
-	fmt.Printf("baseURL - %s\n", daemonCfg.baseURL)
+func (sniffer *NineOneSniffer) prerequisite() {
+	confmgr := sniffer.confmgr
+	dirs := []string{confmgr.config.configBaseDir,
+		confmgr.config.dataBaseDir,
+		confmgr.config.tempDir,
+		confmgr.config.thumbnailBaseDir,
+		confmgr.config.thumbnailNewDir,
+		confmgr.config.videoListBaseDir,
+		confmgr.config.videoMergedDir,
+		confmgr.config.videoPartsDescDoneDir,
+		confmgr.config.videoPartsDescTodoDir,
+		confmgr.config.videoPartsDir,
+	}
+
+	for _, dir := range dirs {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			os.MkdirAll(dir, 0755)
+		}
+	}
 }
 
 func (sniffer *NineOneSniffer) Prefetch(count int, useProxy bool) (string, error) {
@@ -1216,17 +1171,19 @@ func (fetcher *nineOneFetcher) fetchPage(url string, useProxy bool) (body []byte
 }
 
 func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string, error) {
-	if _, err := os.Stat(cookieFile); os.IsNotExist(err) {
+	confmgr := fetcher.sniffer.confmgr
+
+	if _, err := os.Stat(confmgr.config.cookieFile); os.IsNotExist(err) {
 		log.Fatal(err)
 	}
 
-	_, err := fetcher.parseCookies(cookieFile)
+	_, err := fetcher.parseCookies(confmgr.config.cookieFile)
 	if err != nil {
 		return "", err
 	}
 
 	now := time.Now()
-	dir := "data/list/" + now.Format("2006-01-02")
+	dir := confmgr.config.videoListBaseDir + "/" + now.Format("2006-01-02")
 	if _, err := os.Open(dir); os.IsNotExist(err) {
 		os.MkdirAll(dir, 0644)
 	}
@@ -1249,7 +1206,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 				break
 			}
 
-			src := fmt.Sprintf(baseurl+"%d", index+1)
+			src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
 
 			if info, err := fetcher.fetchPage(src, useProxy); err != nil {
 				failCount += 1
@@ -1288,7 +1245,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 
 	go obverserRoutine()
 
-	for i := start; i < count; i++ {
+	for i := 0; i < count; i++ {
 		indexChannel <- i
 	}
 
@@ -1311,7 +1268,9 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 }
 
 func (fetcher *nineOneFetcher) fetchThumbnails(script bool) {
-	thumbnailDir := "data/images/base"
+	confmgr := fetcher.sniffer.confmgr
+
+	thumbnailDir := confmgr.config.thumbnailBaseDir
 	f, err := os.Open(thumbnailDir)
 	if err != nil {
 		log.Fatal(err)
@@ -1333,7 +1292,7 @@ func (fetcher *nineOneFetcher) fetchThumbnails(script bool) {
 
 	var newThumbnailsCount int
 
-	httpHeadersFile, err := os.Open("./configs/thumbnail_http_headers.txt")
+	httpHeadersFile, err := os.Open(confmgr.config.workDir + "/configs/thumbnail_http_headers.txt")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1426,6 +1385,11 @@ func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 		body, err := ioutil.ReadAll(resp.Body)
 		defer resp.Body.Close()
 
+		if strings.Contains(string(body), "Sorry, the page can not found!") {
+			fmt.Printf("This video may have been deleted\n")
+			break
+		}
+
 		if strings.Contains(string(body), "Sorry") {
 			fmt.Printf("Up limit reached, now stop\n")
 			break
@@ -1447,6 +1411,8 @@ func (fetcher *nineOneFetcher) fetchDetailedVideoPages() {
 }
 
 func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool, useProxy bool) error {
+	confmgr := fetcher.sniffer.confmgr
+
 	if len(url) == 0 {
 		return fmt.Errorf("url shouldn't be empty")
 	}
@@ -1456,8 +1422,12 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 		return err
 	}
 
+	if strings.Contains(string(content), "Sorry, the page can not found!") {
+		return fmt.Errorf("This video may have been removed, now stop!")
+	}
+
 	if strings.Contains(string(content), "Sorry") {
-		return fmt.Errorf("Up limit reached, now stop")
+		return fmt.Errorf("Up limit reached, now stop!")
 	}
 
 	sniffer := *fetcher.sniffer
@@ -1500,19 +1470,19 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 		return !os.IsNotExist(err), err
 	}
 
-	exist, err := isExist(videoPartsDescTodoDir + "/" + *name)
+	exist, err := isExist(confmgr.config.videoPartsDescTodoDir + "/" + *name)
 	if exist {
 		fmt.Printf("video descriptor - %s has already been in the repository, skip now\n", *name)
 		return err
 	}
 
-	exist, err = isExist(videoPartsDescDoneDir + "/" + *name)
+	exist, err = isExist(confmgr.config.videoPartsDescDoneDir + "/" + *name)
 	if exist {
 		fmt.Printf("video descriptor - %s has already been in the repository, skip now\n", *name)
 		return err
 	}
 
-	filename := videoPartsDescTodoDir + "/" + *name
+	filename := confmgr.config.videoPartsDescTodoDir + "/" + *name
 
 	// fmt.Printf("src - %s, filename - %s, useProxy - %v\n", *src, filename, useProxy)
 
@@ -1528,6 +1498,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 	sniffer := *fetcher.sniffer
 	parser := sniffer.parser
+	confmgr := sniffer.confmgr
 
 	finalFileName, filePartsCountInteger := parser.parseVideoDescriptor(filename,
 		videoPartsBaseName)
@@ -1557,13 +1528,13 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 					videoPartName := videoPartURL[strings.LastIndex(videoPartURL, "/")+1:]
 
-					dirName := "./data/video/video_parts/" + finalFileName
+					dirName := confmgr.config.videoPartsDir + "/" + finalFileName
 					_, err := os.Open(dirName)
 					if os.IsNotExist(err) {
 						os.Mkdir(dirName, 0755)
 					}
 
-					name := "./data/video/video_parts/" + finalFileName + "/" + videoPartName
+					name := confmgr.config.videoPartsDir + "/" + finalFileName + "/" + videoPartName
 
 					if err = fetcher.wget(videoPartURL, name, useProxy); err != nil {
 						fmt.Println(err)
@@ -1576,7 +1547,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 		}
 
 		for j := 0; j < jobCount; j++ {
-			taskURLChannel <- fmt.Sprintf("https://cdn.91p07.com//m3u8/%s/%s%d.ts", finalFileName, finalFileName, j)
+			taskURLChannel <- fmt.Sprintf(confmgr.config.videoPartsURLBase+"/%s/%s%d.ts", finalFileName, finalFileName, j)
 		}
 
 		for n := 0; n < jobCount; n++ {
@@ -1587,12 +1558,12 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 	}(filePartsCountInteger, howmanyWorkers)
 
 	/* Merge all the downloaded video parts into one and do transcoding */
-	os.Remove("./data/video/video_merged/" + finalFileName + ".ts")
-	mergedFile, _ := os.OpenFile("./data/video/video_merged/"+finalFileName+".ts", os.O_CREATE|os.O_WRONLY, 0644)
+	os.Remove(confmgr.config.videoMergedDir + finalFileName + ".ts")
+	mergedFile, _ := os.OpenFile(confmgr.config.videoMergedDir+"/"+finalFileName+".ts", os.O_CREATE|os.O_WRONLY, 0644)
 
 	/* TODO: Should resolve the case when some of the video parts are missing */
 	for i := 0; i < filePartsCountInteger; i++ {
-		filePart := fmt.Sprintf("./data/video/video_parts/%s/%s%d.ts", finalFileName, finalFileName, i)
+		filePart := fmt.Sprintf("%s/%s/%s%d.ts", confmgr.config.videoPartsDir, finalFileName, finalFileName, i)
 		f, err := os.Open(filePart)
 		if err != nil {
 			fmt.Println(err)
@@ -1616,12 +1587,12 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 	mergedFile.Close()
 
-	os.Rename("./data/video/m3u8/todo/"+finalFileName+".m3u8", "./data/video/m3u8/done/"+finalFileName+".m3u8")
+	os.Rename(confmgr.config.videoPartsDescTodoDir+"/"+finalFileName+".m3u8", confmgr.config.videoPartsDescDoneDir+"/"+finalFileName+".m3u8")
 
 	if fetcher.sniffer.Transcode {
 		var cmd *exec.Cmd
-		cmd = exec.Command("ffmpeg", "-i", "./data/video/video_merged/"+finalFileName+".ts", "-c:v",
-			"h264_qsv", "-c:a", "aac", "-strict", "-2", "./data/video/video_merged/"+finalFileName+".mp4")
+		cmd = exec.Command("ffmpeg", "-i", confmgr.config.videoMergedDir+"/"+finalFileName+".ts", "-c:v",
+			"h264_qsv", "-c:a", "aac", "-strict", "-2", confmgr.config.videoMergedDir+"/"+finalFileName+".mp4")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err := cmd.Run()
@@ -1633,9 +1604,9 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 		kill.Env = []string{"PATH=\"C:\\Program Files (x86)\\FormatFactory\""}
 		kill.Run()
 
-		finalFileNameWithPath := "./data/video/video_merged/" + finalFileName + ".ts"
+		finalFileNameWithPath := confmgr.config.videoMergedDir + "/" + finalFileName + ".ts"
 
-		if err := os.Remove("./data/video/video_merged/" + finalFileName + ".ts"); err != nil {
+		if err := os.Remove(confmgr.config.videoMergedDir + "/" + finalFileName + ".ts"); err != nil {
 			fmt.Println(err)
 
 			cmd = exec.Command("cmd.exe", "/C", "del", finalFileNameWithPath)
@@ -1643,14 +1614,16 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 		}
 
-		if err := os.RemoveAll("./data/video/video_parts/" + finalFileName); err != nil {
+		if err := os.RemoveAll(confmgr.config.videoPartsDir + "/" + finalFileName); err != nil {
 			fmt.Println(err)
 		}
 	}
 }
 
 func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge(useProxy bool) error {
-	f, err := os.Open(videoPartsDescTodoDir)
+	confmgr := fetcher.sniffer.confmgr
+
+	f, err := os.Open(confmgr.config.videoPartsDescTodoDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1661,21 +1634,15 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge(useProxy bool) error {
 			descriptorName := info.Name()
 			if strings.Contains(descriptorName, ".mp4") {
 				/* Legacy video files do not have descriptor file */
-				os.Rename(videoPartsDescTodoDir+"/"+info.Name(), videoMergedDir+"/"+info.Name())
+				os.Rename(confmgr.config.videoPartsDescTodoDir+"/"+info.Name(), confmgr.config.videoMergedDir+"/"+info.Name())
 				continue
 			}
 
 			baseName := descriptorName[:len(descriptorName)-len(".m3u8")]
-			fmt.Printf("analyze and download file - %s\n", info.Name())
+			fmt.Printf("downloading file - %s\n", info.Name())
 
-			//fetcher.fetchVideoPartsByName(videoPartsDescTodoDir+"/"+descriptorName, baseName, false)
-			fetcher.fetchVideoPartsByNameWithWorkers(videoPartsDescTodoDir+"/"+descriptorName, baseName, useProxy)
-			os.Rename(videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
-
-			//cmd := exec.Command("mv", "-f", videoPartsDescTodoDir+"/"+info.Name(), videoPartsDescDoneDir+"/"+info.Name())
-			//if err = cmd.Run(); err != nil {
-			//	fmt.Println(err)
-			//}
+			fetcher.fetchVideoPartsByNameWithWorkers(confmgr.config.videoPartsDescTodoDir+"/"+descriptorName, baseName, useProxy)
+			os.Rename(confmgr.config.videoPartsDescTodoDir+"/"+info.Name(), confmgr.config.videoPartsDescDoneDir+"/"+info.Name())
 		}
 	}
 
@@ -1688,13 +1655,11 @@ func videoListTableInsert(db *sql.DB, viewkey string, url string, title string, 
 	//			select viewkey, url
 	//			from (select ? as vk, ? as url) t
 	//			where not exists (select 1 from VideoListTable where VideoListTable.viewkey = t.vk)`
-	//fmt.Println(sql)
 	tx, _ := db.Begin()
 	stmt, _ := tx.Prepare("insert into VideoListTable (title, viewkey, url, thumbnail, thumbnail_id, date, author, duration) values (?,?,?,?,?,?,?,?)")
 	//stmt, _ := tx.Prepare(sql)
 	_, err := stmt.Exec(title, viewkey, url, thumbnail, thumbnailID, time.Now().Format("2006-01-02 15:04:05"), author, videoTime)
 	if err != nil {
-		//log.Print(err)
 		tx.Rollback()
 		return err
 	}

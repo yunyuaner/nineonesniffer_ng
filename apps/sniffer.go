@@ -17,7 +17,6 @@ var persist bool
 var thumbnail bool
 var help bool
 var transcode bool
-var dumpCfg bool
 var script bool
 var proxy bool
 var keep bool
@@ -49,7 +48,6 @@ func initParameters() {
 	flag.BoolVar(&script, "script", false, "Only generate script for downloading thumbnails")
 	flag.BoolVar(&transcode, "transcode", false, "Convert download video files from ts to mp4 format")
 	flag.BoolVar(&help, "help", false, "Show help")
-	flag.BoolVar(&dumpCfg, "dump_cfg", false, "Dump configurations")
 }
 
 const (
@@ -89,11 +87,6 @@ func main() {
 	if help {
 		showHelp(os.Args[0])
 		//flag.PrintDefaults()
-		os.Exit(0)
-	}
-
-	if dumpCfg {
-		sniffer.DumpCfg()
 		os.Exit(0)
 	}
 
