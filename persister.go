@@ -21,9 +21,11 @@ type nineonePersister struct {
 
 func (persister *nineonePersister) init() {
 	var isDatabaseFirstCreated bool
+	confmgr := persister.sniffer.confmgr
 
-	if _, err := os.Stat(dbFileName); os.IsNotExist(err) {
-		file, err := os.Create(dbFileName)
+	database := confmgr.config.sqliteDir + "/" + dbFileName
+	if _, err := os.Stat(database); os.IsNotExist(err) {
+		file, err := os.Create(database)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -32,7 +34,7 @@ func (persister *nineonePersister) init() {
 		isDatabaseFirstCreated = true
 	}
 
-	persister.db, _ = sql.Open("sqlite3", dbFileName)
+	persister.db, _ = sql.Open("sqlite3", database)
 	if isDatabaseFirstCreated {
 		persister.videoListTableCreate()
 	}

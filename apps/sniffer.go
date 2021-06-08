@@ -17,6 +17,7 @@ var help bool
 var transcode bool
 var proxy bool
 var keep bool
+var proxyQuery bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
@@ -42,6 +43,8 @@ func initParameters() {
 	flag.BoolVar(&proxy, "proxy", false, "Use SOCKS5 proxy")
 	flag.BoolVar(&transcode, "transcode", false, "Convert download video files from ts to mp4 format")
 	flag.BoolVar(&help, "help", false, "Show help")
+
+	flag.BoolVar(&proxyQuery, "proxyQuery", false, "Query Proxies")
 }
 
 const (
@@ -71,6 +74,11 @@ func main() {
 
 	if help {
 		showHelp(os.Args[0])
+		os.Exit(0)
+	}
+
+	if proxyQuery {
+		sniffer.ProxyQuery()
 		os.Exit(0)
 	}
 

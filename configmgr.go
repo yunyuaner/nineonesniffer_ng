@@ -31,6 +31,7 @@ type nineOneSnifferConfig struct {
 	thumbnailBaseDir      string
 	thumbnailNewDir       string
 	utilsDir              string
+	sqliteDir             string
 	tempDir               string
 }
 
@@ -202,6 +203,7 @@ func (confmgr *NineOneConfManager) makeConfigStruct() {
 		"thumbnail_base_dir":        "${data_base_dir}/images/base",
 		"thumbnail_new_dir":         "${data_base_dir}/images/new",
 		"utils_dir":                 "${work_dir}/utils",
+		"sqlite_dir":                "${data_base_dir}",
 		"temp_dir":                  "${work_dir}/tmp",
 	}
 
@@ -233,6 +235,7 @@ func (confmgr *NineOneConfManager) makeConfigStruct() {
 	confmgr.config.thumbnailBaseDir = configMapVal("thumbnail_base_dir")
 	confmgr.config.thumbnailNewDir = configMapVal("thumbnail_new_dir")
 	confmgr.config.utilsDir = configMapVal("utils_dir")
+	confmgr.config.sqliteDir = configMapVal("sqlite_dir")
 	confmgr.config.tempDir = configMapVal("temp_dir")
 }
 
@@ -251,5 +254,6 @@ func (confmgr *NineOneConfManager) showConfig() {
 	fmt.Printf("thumbnailBaseDir - %s\n", confmgr.config.thumbnailBaseDir)
 	fmt.Printf("thumbnailNewDir - %s\n", confmgr.config.thumbnailNewDir)
 	fmt.Printf("utilsDir - %s\n", confmgr.config.utilsDir)
+	fmt.Printf("sqliteDir - %s\n", confmgr.config.sqliteDir)
 	fmt.Printf("tempDir - %s\n", confmgr.config.tempDir)
 }

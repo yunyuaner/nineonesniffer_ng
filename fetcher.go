@@ -10,8 +10,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -59,11 +61,156 @@ func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, er
 	return fetcher.cookies, nil
 }
 
+func (fetcher *nineOneFetcher) get(url string, socks5Proxy string) (body []byte, err error) {
+	return fetcher.fetchGeneric(url, "GET", nil, socks5Proxy, 30*time.Second)
+}
+
+func (fetcher *nineOneFetcher) post(url string, formData map[string]string, socks5Proxy string) (body []byte, err error) {
+	return fetcher.fetchGeneric(url, "POST", nil, socks5Proxy, 30*time.Second)
+}
+
+func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData map[string]string,
+	socks5Proxy string, timeout time.Duration) (body []byte, err error) {
+	var resp *http.Response
+	var req *http.Request
+	var reader io.ReadCloser
+	var client *http.Client
+	var useHttps, useProxy bool
+	var contextDialer proxy.ContextDialer
+
+	// fmt.Printf("url - %s, socks5 - %s\n", url_, socks5Proxy)
+	if strings.ToLower(method) == "post" && formData != nil && len(formData) > 0 {
+		form := url.Values{}
+		for k, v := range formData {
+			form.Add(k, v)
+		}
+
+		req, _ = http.NewRequest(method, url_, strings.NewReader(form.Encode()))
+	} else {
+		req, _ = http.NewRequest(method, url_, nil)
+	}
+
+	if fetcher.cookies != nil {
+		for _, c := range fetcher.cookies {
+			cookie := c
+			req.AddCookie(cookie)
+		}
+	}
+
+	req.Header.Set("User-Agent", fetcher.userAgent)
+	req.Header.Add("Accept-Encoding", "gzip")
+
+	re := regexp.MustCompile(`^https`)
+	url_ = strings.ToLower(strings.TrimSpace(url_))
+	useHttps = re.MatchString(url_)
+
+	if len(socks5Proxy) > 0 {
+		re = regexp.MustCompile(`^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]+$`)
+		socks5Proxy = strings.TrimSpace(socks5Proxy)
+		useProxy = re.MatchString(socks5Proxy)
+	}
+
+	// fmt.Printf("useHttps - %v, useProxy - %v\n", useHttps, useProxy)
+
+	if useProxy {
+		baseDialer := &net.Dialer{
+			Timeout:   timeout,
+			KeepAlive: 30 * time.Second,
+		}
+
+		dialSocksProxy, _ := proxy.SOCKS5("tcp", socks5Proxy, nil, baseDialer)
+		contextDialer, _ = dialSocksProxy.(proxy.ContextDialer)
+	}
+
+	if useHttps {
+		cfg := &tls.Config{
+			MinVersion:               tls.VersionTLS12,
+			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+			PreferServerCipherSuites: true,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+				tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			},
+		}
+
+		tr := &http.Transport{
+			MaxIdleConns:       10,
+			IdleConnTimeout:    60 * time.Second,
+			DisableCompression: true,
+			TLSClientConfig:    cfg,
+		}
+
+		// tr.Proxy = http.ProxyFromEnvironment
+		if contextDialer != nil {
+			tr.DialContext = contextDialer.DialContext
+		}
+
+		client = &http.Client{
+			Transport: tr,
+			Timeout:   120 * time.Second,
+		}
+	} else {
+		tr := &http.Transport{
+			MaxIdleConns:          10,
+			IdleConnTimeout:       60 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
+		}
+
+		// tr.Proxy = http.ProxyFromEnvironment
+		if contextDialer != nil {
+			tr.DialContext = contextDialer.DialContext
+		}
+
+		client = &http.Client{
+			Transport: tr,
+			Timeout:   timeout,
+		}
+	}
+
+	resp, err = client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	switch resp.Header.Get("Content-Encoding") {
+	case "gzip":
+		reader, err = gzip.NewReader(resp.Body)
+		defer reader.Close()
+	default:
+		reader = resp.Body
+	}
+
+	if body, err = ioutil.ReadAll(reader); err != nil {
+		return nil, err
+	}
+
+	return body, nil
+}
+
 func (fetcher *nineOneFetcher) wget(url string, outputFile string, useProxy bool) error {
 	var resp *http.Response
 	var reader io.ReadCloser
+	var client *http.Client
 
-	client := fetcher.newHTTPSClient(useProxy)
+	re := regexp.MustCompile(`^https`)
+	useHttps := re.MatchString(strings.ToLower(strings.TrimSpace(url)))
+
+	if useHttps {
+		client = fetcher.newHTTPSClient(useProxy)
+	} else {
+		client = fetcher.newHTTPClient(useProxy)
+	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -128,16 +275,18 @@ func (fetcher *nineOneFetcher) newHTTPClient(useProxy bool) *http.Client {
 		contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
 		dialContext := contextDialer.DialContext
 
+		tr := &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialContext,
+			MaxIdleConns:          10,
+			IdleConnTimeout:       60 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
+		}
+
 		httpClient := &http.Client{
-			Transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				DialContext:           dialContext,
-				MaxIdleConns:          10,
-				IdleConnTimeout:       60 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-				MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
-			},
+			Transport: tr,
 		}
 
 		return httpClient
@@ -187,53 +336,9 @@ func (fetcher *nineOneFetcher) newHTTPSClient(useProxy bool) *http.Client {
 	return client
 }
 
-func (fetcher *nineOneFetcher) fetchPage(url string, useProxy bool) (body []byte, err error) {
-	var resp *http.Response
-	var reader io.ReadCloser
-
-	req, err := http.NewRequest("GET", url, nil)
-
-	if fetcher.cookies != nil {
-		for _, c := range fetcher.cookies {
-			cookie := c
-			req.AddCookie(cookie)
-		}
-	}
-
-	req.Header.Set("User-Agent", fetcher.userAgent)
-	req.Header.Add("Accept-Encoding", "gzip")
-
-	client := fetcher.newHTTPClient(useProxy)
-
-	resp, err = client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != 200 {
-		err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-
-	switch resp.Header.Get("Content-Encoding") {
-	case "gzip":
-		reader, err = gzip.NewReader(resp.Body)
-		defer reader.Close()
-	default:
-		reader = resp.Body
-	}
-
-	if body, err = ioutil.ReadAll(reader); err != nil {
-		return nil, err
-	}
-
-	return body, nil
-}
-
 func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string, error) {
 	confmgr := fetcher.sniffer.confmgr
+	obs := fetcher.sniffer.obs
 
 	if _, err := os.Stat(confmgr.config.cookieFile); os.IsNotExist(err) {
 		log.Fatal(err)
@@ -260,19 +365,32 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 
 	var failIndexList []int
 
-	fetchRoutine := func(useProxy bool) {
+	fetchRoutine := func() {
+		proxy := ""
+		if useProxy {
+			proxy, _ = obs.yield()
+			fmt.Printf("yield proxy - %s\n", proxy)
+		}
+
 		for {
 			index, ok := <-indexChannel
 			if !ok {
 				doneChannel <- struct{}{}
+				obs.release(proxy)
 				break
 			}
 
 			src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
 
-			if info, err := fetcher.fetchPage(src, useProxy); err != nil {
+			if info, err := fetcher.get(src, proxy); err != nil {
 				failCount += 1
 				failIndexList = append(failIndexList, index)
+
+				/* if failed, exit */
+				concurrentRtnCount -= 1
+				obs.release(proxy)
+				doneChannel <- struct{}{}
+				break
 			} else {
 				successCount += 1
 				observerChannel <- index
@@ -285,14 +403,15 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 		}
 	}
 
-	if count <= 200 {
-		concurrentRtnCount = 1
+	if useProxy {
+		concurrentRtnCount = obs.count()
 	} else {
-		concurrentRtnCount = 8
+		/* FIXME: when using multi-threaded method to fetch video list, it's very likely to get banned */
+		concurrentRtnCount = 1
 	}
 
 	for i := 0; i < concurrentRtnCount; i++ {
-		go fetchRoutine(useProxy)
+		go fetchRoutine()
 	}
 
 	obverserRoutine := func() {
@@ -301,7 +420,8 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 				break
 			}
 			index := <-observerChannel
-			fmt.Printf("\rLatest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d", index, count, successCount, failCount)
+			fmt.Printf("\rthread - %2d, Latest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d",
+				concurrentRtnCount, index, count, successCount, failCount)
 		}
 	}
 
@@ -311,7 +431,6 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 		indexChannel <- i
 	}
 
-	/* Retry failed items if any */
 	if len(failIndexList) > 0 {
 		for _, index := range failIndexList {
 			indexChannel <- index
@@ -424,7 +543,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 		return fmt.Errorf("url shouldn't be empty")
 	}
 
-	content, err := fetcher.fetchPage(url, useProxy)
+	content, err := fetcher.get(url, "")
 	if err != nil {
 		return err
 	}
@@ -671,7 +790,7 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string,
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Println(resp.Status)
-		err = fmt.Errorf("http status code - %s\n", resp.StatusCode)
+		err = fmt.Errorf("http status code - %v\n", resp.StatusCode)
 		return -1, "", err
 	}
 

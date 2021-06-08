@@ -15,6 +15,7 @@ type NineOneSniffer struct {
 	Transcode bool
 	confmgr   *NineOneConfManager
 	persister *nineonePersister
+	obs       *obscurer
 }
 
 func (sniffer *NineOneSniffer) Init() {
@@ -27,6 +28,7 @@ func (sniffer *NineOneSniffer) Init() {
 	sniffer.confmgr = new(NineOneConfManager)
 	configFile := workDir + "\\configs\\NineOneSniffer.conf"
 	sniffer.confmgr.Start(configFile)
+	// sniffer.confmgr.showConfig()
 
 	/* database setup */
 	sniffer.persister = new(nineonePersister)
@@ -34,6 +36,10 @@ func (sniffer *NineOneSniffer) Init() {
 	sniffer.persister.init()
 
 	sniffer.prerequisite()
+
+	sniffer.obs = new(obscurer)
+	sniffer.obs.sniffer = sniffer
+	sniffer.obs.proxySetup()
 
 	sniffer.fetcher.sniffer = sniffer
 	sniffer.parser.sniffer = sniffer
@@ -62,6 +68,12 @@ func (sniffer *NineOneSniffer) prerequisite() {
 		}
 	}
 }
+
+func (sniffer *NineOneSniffer) ProxyQuery() {
+	sniffer.obs.proxyInvalidate(false)
+	// sniffer.obs.queryhideme()
+}
+
 func (sniffer *NineOneSniffer) Prefetch(count int, useProxy bool) (string, error) {
 	return sniffer.fetcher.fetchVideoList(count, useProxy)
 }
