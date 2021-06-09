@@ -50,12 +50,12 @@ func (obs *obscurer) queryhideme() (proxy []string) {
 	fetcher := obs.sniffer.fetcher
 	parser := obs.sniffer.parser
 
-	data, err := fetcher.get("https://spys.one/en/socks-proxy-list/", "")
+	data, err := fetcher.get("https://hidemy.name/en/proxy-list/?type=5", "")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
 
-	fmt.Println(string(data))
+	// fmt.Println(string(data))
 
 	doc, err := html.Parse(strings.NewReader(string(data)))
 	if err != nil {
@@ -72,7 +72,7 @@ func (obs *obscurer) queryhideme() (proxy []string) {
 				}
 
 				if q.Data == "tr" {
-					_, err := parser.findFirstChildOfElementNode(q, "td")
+					r, err := parser.findFirstChildOfElementNode(q, "td")
 					if err != nil {
 						fmt.Println(err)
 						continue
@@ -80,12 +80,21 @@ func (obs *obscurer) queryhideme() (proxy []string) {
 
 					// fmt.Println(r.Data)
 
-					// ip, err := parser.getInnerHTMLOfElementNode(r)
-					// if err != nil {
-					// 	fmt.Println(err)
-					// 	continue
-					// }
-					// fmt.Printf("ip - %s\n", ip)
+					ip, err := parser.getInnerHTMLOfElementNode(r)
+					if err != nil {
+						fmt.Println(err)
+						continue
+					}
+
+					s, err := parser.findSiblingOfElementNode(r, "td")
+					port, err := parser.getInnerHTMLOfElementNode(s)
+					if err != nil {
+						fmt.Println(err)
+						continue
+					}
+
+					// fmt.Printf("%s:%s\n", ip, port)
+					proxy = append(proxy, fmt.Sprintf("%s:%s", ip, port))
 				}
 			}
 		}
@@ -95,7 +104,7 @@ func (obs *obscurer) queryhideme() (proxy []string) {
 	}
 	f(doc)
 
-	return nil
+	return proxy
 }
 
 func (obs *obscurer) queryspys() (proxy []string) {
@@ -225,7 +234,9 @@ func (obs *obscurer) queryspys() (proxy []string) {
 }
 
 func (obs *obscurer) proxyInvalidate() {
-	probedProxies := obs.queryspys()
+	spys := obs.queryspys()
+	hideme := obs.queryhideme()
+	spys = append(spys, hideme...)
 
 	fetcher := obs.sniffer.fetcher
 	confmgr := obs.sniffer.confmgr
@@ -243,9 +254,9 @@ func (obs *obscurer) proxyInvalidate() {
 
 	defer f.Close()
 
-	fmt.Printf("Query proxy item count - %d\n", len(probedProxies))
+	fmt.Printf("Query proxy item count - %d\n", len(spys))
 
-	for _, proxy := range probedProxies {
+	for _, proxy := range spys {
 		fmt.Printf("Tring %s", proxy)
 		if _, err := fetcher.fetchGeneric(tryURL, "GET", nil, proxy, 30*time.Second); err != nil {
 			fmt.Printf(" fail\n")

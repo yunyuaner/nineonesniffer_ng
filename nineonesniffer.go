@@ -71,7 +71,7 @@ func (sniffer *NineOneSniffer) prerequisite() {
 
 func (sniffer *NineOneSniffer) ProxyQuery() {
 	sniffer.obs.proxyInvalidate()
-	// sniffer.obs.queryhideme()
+	// fmt.Println(sniffer.obs.queryhideme())
 	// fmt.Println(sniffer.obs.queryspys())
 }
 
