@@ -78,7 +78,6 @@ func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData
 	var useHttps, useProxy bool
 	var contextDialer proxy.ContextDialer
 
-	// fmt.Printf("url - %s, socks5 - %s\n", url_, socks5Proxy)
 	if strings.ToLower(method) == "post" && formData != nil && len(formData) > 0 {
 		form := url.Values{}
 		for k, v := range formData {
@@ -109,8 +108,6 @@ func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData
 		socks5Proxy = strings.TrimSpace(socks5Proxy)
 		useProxy = re.MatchString(socks5Proxy)
 	}
-
-	// fmt.Printf("useHttps - %v, useProxy - %v\n", useHttps, useProxy)
 
 	if useProxy {
 		baseDialer := &net.Dialer{
@@ -271,7 +268,10 @@ func (fetcher *nineOneFetcher) newHTTPClient(useProxy bool) *http.Client {
 			KeepAlive: 30 * time.Second,
 		}
 
-		dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, baseDialer)
+		obs := fetcher.sniffer.obs
+		proxy_, _ := obs.yield()
+
+		dialSocksProxy, _ := proxy.SOCKS5("tcp", proxy_, nil, baseDialer)
 		contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
 		dialContext := contextDialer.DialContext
 
@@ -321,7 +321,10 @@ func (fetcher *nineOneFetcher) newHTTPSClient(useProxy bool) *http.Client {
 			KeepAlive: 30 * time.Second,
 		}
 
-		dialSocksProxy, _ := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, baseDialer)
+		obs := fetcher.sniffer.obs
+		proxy_, _ := obs.yield()
+
+		dialSocksProxy, _ := proxy.SOCKS5("tcp", proxy_, nil, baseDialer)
 		contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
 		dialContext := contextDialer.DialContext
 		tr.Proxy = http.ProxyFromEnvironment
@@ -355,7 +358,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 		os.MkdirAll(dir, 0644)
 	}
 
-	var concurrentRtnCount int
+	var concurrentRtnCount, maxConcurrentRtn int
 	doneChannel := make(chan struct{})
 	indexChannel := make(chan int)
 	observerChannel := make(chan int)
@@ -365,85 +368,104 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 
 	var failIndexList []int
 
-	fetchRoutine := func() {
-		proxy := ""
-		if useProxy {
-			proxy, _ = obs.yield()
-			fmt.Printf("yield proxy - %s\n", proxy)
-		}
-
-		for {
-			index, ok := <-indexChannel
-			if !ok {
-				doneChannel <- struct{}{}
-				obs.release(proxy)
-				break
-			}
-
-			src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
-
-			if info, err := fetcher.get(src, proxy); err != nil {
-				failCount += 1
-				failIndexList = append(failIndexList, index)
-
-				/* if failed, exit */
-				concurrentRtnCount -= 1
-				obs.release(proxy)
-				doneChannel <- struct{}{}
-				break
-			} else {
-				successCount += 1
-				observerChannel <- index
-				htmlFile := fmt.Sprintf(dir+"/%04d.html", index+1)
-				err = ioutil.WriteFile(htmlFile, info, 0644)
-				if err != nil {
-					log.Fatal(err)
-				}
-			}
-		}
-	}
-
 	if useProxy {
-		concurrentRtnCount = obs.count()
+		maxConcurrentRtn = obs.count()
+		concurrentRtnCount = maxConcurrentRtn
 	} else {
 		/* FIXME: when using multi-threaded method to fetch video list, it's very likely to get banned */
-		concurrentRtnCount = 1
+		maxConcurrentRtn = 1
+		concurrentRtnCount = maxConcurrentRtn
 	}
 
-	for i := 0; i < concurrentRtnCount; i++ {
-		go fetchRoutine()
-	}
-
-	obverserRoutine := func() {
+	/* Step 1: launch observer routine */
+	go func() {
 		for {
-			if successCount+failCount == count {
+			index, ok := <-observerChannel
+			if !ok {
 				break
+			} else {
+				log.Printf("Threads - %2d, Latest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d\n",
+					concurrentRtnCount, index, count, successCount, failCount)
 			}
-			index := <-observerChannel
-			fmt.Printf("\rthread - %2d, Latest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d",
-				concurrentRtnCount, index, count, successCount, failCount)
 		}
+	}()
+
+	/* Step 2: launch worker routines */
+	for i := 0; i < concurrentRtnCount; i += 1 {
+		go func() {
+			proxy := ""
+			if useProxy {
+				proxy, _ = obs.yield()
+				log.Printf("yield proxy - %s\n", proxy)
+			}
+
+			for {
+				index, ok := <-indexChannel
+				if !ok {
+					doneChannel <- struct{}{}
+					obs.release(proxy)
+					break
+				}
+
+				src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
+				log.Printf("proxy - %s, src - %s\n", proxy, src)
+
+				if info, err := fetcher.get(src, proxy); err != nil {
+					failCount += 1
+					failIndexList = append(failIndexList, index)
+
+					/* if failed, exit */
+					concurrentRtnCount -= 1
+					obs.release(proxy)
+
+					log.Printf("proxy - %s fail, exit\n", proxy)
+					doneChannel <- struct{}{}
+					break
+				} else {
+					/* TODO: return result may be banned */
+					successCount += 1
+					observerChannel <- index
+
+					htmlFile := fmt.Sprintf(dir+"/%04d.html", index+1)
+					err = ioutil.WriteFile(htmlFile, info, 0644)
+					if err != nil {
+						log.Fatal(err)
+					}
+				}
+			}
+		}()
 	}
 
-	go obverserRoutine()
+	go func(count_ int) {
+		/* Step 3: dispatch task to worker routines */
+		log.Printf("dispatch task to worker routines, taskk count - %d\n", count_)
 
-	for i := 0; i < count; i++ {
-		indexChannel <- i
-	}
-
-	if len(failIndexList) > 0 {
-		for _, index := range failIndexList {
-			indexChannel <- index
+		for i := 0; i < count_; i += 1 {
+			indexChannel <- i
 		}
-	}
 
-	close(indexChannel)
+		/* Step 4 (Optional): retry the failed tasks*/
+		log.Println("retry the failed tasks")
 
-	for i := 0; i < concurrentRtnCount; i++ {
+		if len(failIndexList) > 0 {
+			for _, index := range failIndexList {
+				indexChannel <- index
+			}
+		}
+
+		log.Println("close index channel")
+		close(indexChannel)
+	}(count)
+
+	/* Step 5: wait till all the worker routines have been finished */
+	for i := 0; i < maxConcurrentRtn; i += 1 {
 		<-doneChannel
+		log.Printf("done channels - [ %2d of %2d ]\n", i+1, maxConcurrentRtn)
 	}
 
-	fmt.Printf("\n")
+	log.Println("close observer channel")
+	close(observerChannel)
+	// log.Printf("\n")
 
 	return dir, nil
 }
@@ -543,7 +565,10 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 		return fmt.Errorf("url shouldn't be empty")
 	}
 
-	content, err := fetcher.get(url, "")
+	obs := fetcher.sniffer.obs
+	proxy_, _ := obs.yield()
+
+	content, err := fetcher.get(url, proxy_)
 	if err != nil {
 		return err
 	}

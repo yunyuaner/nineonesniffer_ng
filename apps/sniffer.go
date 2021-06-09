@@ -56,10 +56,10 @@ func showHelp(name string) {
 	fmt.Printf("Usage: %s -mode [dl_desc|dl_video|sync|identify_date] [url] [count] [persist] [help]\n", name)
 
 	fmt.Printf("%sDownload video descriptor\n", tab)
-	fmt.Printf("%s%s -mode dl_desc -url video_page_url [-presist]\n", doubleTab, name)
+	fmt.Printf("%s%s -mode dl_desc -url video_page_url [-presist] [-proxy]\n", doubleTab, name)
 
 	fmt.Printf("%sDownload video files using per-downloaded video descriptors\n", tab)
-	fmt.Printf("%s%s -mode dl_video [-url video_page_url] [-transcode] [-persist]\n", doubleTab, name)
+	fmt.Printf("%s%s -mode dl_video [-url video_page_url] [-transcode] [-persist] [-proxy]\n", doubleTab, name)
 
 	fmt.Printf("%sSync the lastest video list ( prefetch + parse )\n", tab)
 	fmt.Printf("%s%s -mode sync -count num [-proxy] [-keep]\n", doubleTab, name)

@@ -100,10 +100,21 @@ func (obs *obscurer) queryhideme() (proxy []string) {
 
 func (obs *obscurer) queryspys() (proxy []string) {
 	fetcher := obs.sniffer.fetcher
-	data, err := fetcher.get("https://spys.one/en/socks-proxy-list/", "")
+	// data, err := fetcher.get("https://spys.one/en/socks-proxy-list/", "")
+	formData := map[string]string{
+		"xpp": "2",
+		"xf1": "0",
+		"xf2": "0",
+		"xf4": "0",
+		"xf5": "2",
+	}
+
+	data, err := fetcher.post("https://spys.one/en/socks-proxy-list/", formData, "")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+
+	// fmt.Println(string(data))
 
 	doc, err := html.Parse(strings.NewReader(string(data)))
 	if err != nil {
@@ -213,13 +224,17 @@ func (obs *obscurer) queryspys() (proxy []string) {
 	return proxy
 }
 
-func (obs *obscurer) proxyInvalidate(update bool) {
+func (obs *obscurer) proxyInvalidate() {
 	probedProxies := obs.queryspys()
 
 	fetcher := obs.sniffer.fetcher
 	confmgr := obs.sniffer.confmgr
 
 	tryURL := fmt.Sprintf(confmgr.config.listPageURLBase + "1")
+
+	if err := os.Remove("proxies.txt"); err != nil {
+		log.Printf(err.Error())
+	}
 
 	f, err := os.OpenFile("proxies.txt", os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
@@ -228,21 +243,17 @@ func (obs *obscurer) proxyInvalidate(update bool) {
 
 	defer f.Close()
 
+	fmt.Printf("Query proxy item count - %d\n", len(probedProxies))
+
 	for _, proxy := range probedProxies {
 		fmt.Printf("Tring %s", proxy)
 		if _, err := fetcher.fetchGeneric(tryURL, "GET", nil, proxy, 30*time.Second); err != nil {
 			fmt.Printf(" fail\n")
 		} else {
 			fmt.Printf(" success\n")
-			if update {
-				obs.proxies = append(obs.proxies, &obsProxyItem{proxy: proxy, inUse: false})
-			}
+			line := fmt.Sprintf("%s\n", proxy)
+			f.Write([]byte(line))
 		}
-	}
-
-	for _, proxy := range obs.proxies {
-		line := fmt.Sprintf("%s\n", proxy.proxy)
-		f.Write([]byte(line))
 	}
 }
 
