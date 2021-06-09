@@ -104,7 +104,7 @@ func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
 
 			// 'img' tag has attribute class="img-responsive"
 			match, _ := parser.isElementNodeHasAttrs(imgElem, []*html.Attribute{
-				&html.Attribute{
+				{
 					Key: "class",
 					Val: "img-responsive",
 				},
@@ -142,9 +142,10 @@ func (parser *nineOneParser) videoListVisitor(n *html.Node, data interface{}) {
 			}
 
 			match, err = parser.isElementNodeHasAttrs(spanElem, []*html.Attribute{
-				&html.Attribute{
+				{
 					Key: "class",
-					Val: "video-title"},
+					Val: "video-title",
+				},
 			}, &attrCompare)
 
 			attrVal, err = parser.findAttrValueOfElementNode(spanElem, "class")
