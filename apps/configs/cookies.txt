@@ -1,8 +1,1 @@
 language=cn_CN
-cf_clearance=7643c9cff55d722f8983a6666ac02c8126493f4a-1615081855-0-150
-level=8c19PgPxSHmjDH2cMcye36NKSNJXouRah%2BiK8toa
-__utma=50351329.565904732.1604923765.1622556060.1622637347.88
-__utmb=50351329.0.10.1622637347
-__utmc=50351329
-__utmz=50351329.1604923765.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none)
-CLIPSHARE=ji6vuokg58u0s3pq2smqkmmbr7
