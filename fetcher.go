@@ -62,15 +62,23 @@ func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, er
 }
 
 func (fetcher *nineOneFetcher) get(url string, socks5Proxy string) (body []byte, err error) {
-	return fetcher.fetchGeneric(url, "GET", nil, socks5Proxy, 30*time.Second)
+	return fetcher.fetchGeneric(url, "GET", nil, socks5Proxy, 30*time.Second, nil, nil)
 }
 
 func (fetcher *nineOneFetcher) post(url string, formData map[string]string, socks5Proxy string) (body []byte, err error) {
-	return fetcher.fetchGeneric(url, "POST", nil, socks5Proxy, 30*time.Second)
+	return fetcher.fetchGeneric(url, "POST", nil, socks5Proxy, 30*time.Second, nil, nil)
 }
 
-func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData map[string]string,
-	socks5Proxy string, timeout time.Duration) (body []byte, err error) {
+func (fetcher *nineOneFetcher) fetchGeneric(
+	url_ string,
+	method string,
+	formData map[string]string,
+	socks5Proxy string,
+	timeout time.Duration,
+	callback func(resp *http.Response, body []byte, data interface{}) error,
+	data interface{},
+) (body []byte, err error) {
+
 	var resp *http.Response
 	var req *http.Request
 	var reader io.ReadCloser
@@ -109,16 +117,6 @@ func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData
 		useProxy = re.MatchString(socks5Proxy)
 	}
 
-	if useProxy {
-		baseDialer := &net.Dialer{
-			Timeout:   timeout,
-			KeepAlive: 30 * time.Second,
-		}
-
-		dialSocksProxy, _ := proxy.SOCKS5("tcp", socks5Proxy, nil, baseDialer)
-		contextDialer, _ = dialSocksProxy.(proxy.ContextDialer)
-	}
-
 	if useHttps {
 		cfg := &tls.Config{
 			MinVersion:               tls.VersionTLS12,
@@ -139,11 +137,6 @@ func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData
 			TLSClientConfig:    cfg,
 		}
 
-		// tr.Proxy = http.ProxyFromEnvironment
-		if contextDialer != nil {
-			tr.DialContext = contextDialer.DialContext
-		}
-
 		client = &http.Client{
 			Transport: tr,
 			Timeout:   120 * time.Second,
@@ -155,6 +148,16 @@ func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 			MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
+		}
+
+		if useProxy {
+			baseDialer := &net.Dialer{
+				Timeout:   timeout,
+				KeepAlive: 30 * time.Second,
+			}
+
+			dialSocksProxy, _ := proxy.SOCKS5("tcp", socks5Proxy, nil, baseDialer)
+			contextDialer, _ = dialSocksProxy.(proxy.ContextDialer)
 		}
 
 		// tr.Proxy = http.ProxyFromEnvironment
@@ -192,151 +195,54 @@ func (fetcher *nineOneFetcher) fetchGeneric(url_ string, method string, formData
 		return nil, err
 	}
 
+	if callback != nil {
+		callback(resp, body, data)
+	}
+
 	return body, nil
 }
 
-func (fetcher *nineOneFetcher) wget(url string, outputFile string, useProxy bool) error {
-	var resp *http.Response
-	var reader io.ReadCloser
-	var client *http.Client
-
-	re := regexp.MustCompile(`^https`)
-	useHttps := re.MatchString(strings.ToLower(strings.TrimSpace(url)))
-
-	if useHttps {
-		client = fetcher.newHTTPSClient(useProxy)
-	} else {
-		client = fetcher.newHTTPClient(useProxy)
-	}
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("User-Agent", fetcher.userAgent)
-	req.Header.Add("Accept-Encoding", "gzip")
-
-	resp, err = client.Do(req)
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode != 200 {
-		err = errors.New(url + "resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
-		return err
-	}
-
-	defer resp.Body.Close()
-
-	lastModified := resp.Header.Get("Last-Modified")
-	t, err := time.Parse(time.RFC1123, lastModified)
-	keepFileTimestamp := true
-	if err != nil {
-		keepFileTimestamp = false
-	}
-
-	switch resp.Header.Get("Content-Encoding") {
-	case "gzip":
-		reader, err = gzip.NewReader(resp.Body)
-		defer reader.Close()
-	default:
-		reader = resp.Body
-	}
-
-	f, err := os.OpenFile(outputFile, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-
-	if _, err = io.Copy(f, reader); err != nil {
-		return err
-	}
-
-	f.Close()
-	if keepFileTimestamp {
-		os.Chtimes(outputFile, t, t)
-	}
-
-	return nil
-}
-
-func (fetcher *nineOneFetcher) newHTTPClient(useProxy bool) *http.Client {
+func (fetcher *nineOneFetcher) wget(url_ string, outputFile string, useProxy bool) error {
+	var proxy_ string
 	if useProxy {
-		baseDialer := &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}
-
 		obs := fetcher.sniffer.obs
-		proxy_, _ := obs.yield()
-
-		dialSocksProxy, _ := proxy.SOCKS5("tcp", proxy_, nil, baseDialer)
-		contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
-		dialContext := contextDialer.DialContext
-
-		tr := &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           dialContext,
-			MaxIdleConns:          10,
-			IdleConnTimeout:       60 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
-		}
-
-		httpClient := &http.Client{
-			Transport: tr,
-		}
-
-		return httpClient
-	} else {
-		return &http.Client{}
-	}
-}
-
-func (fetcher *nineOneFetcher) newHTTPSClient(useProxy bool) *http.Client {
-	cfg := &tls.Config{
-		MinVersion:               tls.VersionTLS12,
-		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
-		PreferServerCipherSuites: true,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-		},
+		proxy_, _ = obs.yield()
 	}
 
-	tr := &http.Transport{
-		MaxIdleConns:       10,
-		IdleConnTimeout:    60 * time.Second,
-		DisableCompression: true,
-		TLSClientConfig:    cfg,
-	}
+	_, err := fetcher.fetchGeneric(
+		url_,
+		"GET",
+		nil,
+		proxy_,
+		30*time.Second,
+		func(resp *http.Response, body []byte, data interface{}) error {
+			outputFile_ := data.(string)
+			lastModified := resp.Header.Get("Last-Modified")
+			t, err := time.Parse(time.RFC1123, lastModified)
+			keepFileTimestamp := true
+			if err != nil {
+				keepFileTimestamp = false
+			}
 
-	if useProxy {
-		baseDialer := &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}
+			f, err := os.OpenFile(outputFile_, os.O_RDWR|os.O_CREATE, 0644)
+			if err != nil {
+				return err
+			}
 
-		obs := fetcher.sniffer.obs
-		proxy_, _ := obs.yield()
+			defer f.Close()
 
-		dialSocksProxy, _ := proxy.SOCKS5("tcp", proxy_, nil, baseDialer)
-		contextDialer, _ := dialSocksProxy.(proxy.ContextDialer)
-		dialContext := contextDialer.DialContext
-		tr.Proxy = http.ProxyFromEnvironment
-		tr.DialContext = dialContext
-	}
+			if _, err = f.Write(body); err != nil {
+				return nil
+			}
 
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   120 * time.Second,
-	}
+			if keepFileTimestamp {
+				os.Chtimes(outputFile, t, t)
+			}
 
-	return client
+			return nil
+		}, outputFile)
+
+	return err
 }
 
 func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string, error) {

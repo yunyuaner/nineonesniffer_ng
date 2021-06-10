@@ -258,7 +258,7 @@ func (obs *obscurer) proxyInvalidate() {
 
 	for _, proxy := range spys {
 		fmt.Printf("Tring %s", proxy)
-		if _, err := fetcher.fetchGeneric(tryURL, "GET", nil, proxy, 30*time.Second); err != nil {
+		if _, err := fetcher.fetchGeneric(tryURL, "GET", nil, proxy, 30*time.Second, nil, nil); err != nil {
 			fmt.Printf(" fail\n")
 		} else {
 			fmt.Printf(" success\n")
