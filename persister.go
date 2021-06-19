@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -23,7 +24,7 @@ func (persister *nineonePersister) init() {
 	var isDatabaseFirstCreated bool
 	confmgr := persister.sniffer.confmgr
 
-	database := confmgr.config.sqliteDir + "/" + dbFileName
+	database := filepath.Join(confmgr.config.sqliteDir, dbFileName)
 	if _, err := os.Stat(database); os.IsNotExist(err) {
 		file, err := os.Create(database)
 		if err != nil {
