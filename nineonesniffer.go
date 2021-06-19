@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -26,7 +27,7 @@ func (sniffer *NineOneSniffer) Init() {
 
 	/* configuration setup */
 	sniffer.confmgr = new(NineOneConfManager)
-	configFile := workDir + "\\configs\\NineOneSniffer.conf"
+	configFile := filepath.Join(workDir, "configs/NineOneSniffer.conf")
 	sniffer.confmgr.Start(configFile)
 	// sniffer.confmgr.showConfig()
 
