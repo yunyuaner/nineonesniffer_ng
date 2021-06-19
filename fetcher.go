@@ -261,7 +261,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	now := time.Now()
 	dir := confmgr.config.videoListBaseDir + "/" + now.Format("2006-01-02")
 	if _, err := os.Open(dir); os.IsNotExist(err) {
-		os.MkdirAll(dir, 0644)
+		os.MkdirAll(dir, 0755)
 	}
 
 	var concurrentRtnCount, maxConcurrentRtn int
@@ -344,7 +344,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 
 	go func(count_ int) {
 		/* Step 3: dispatch task to worker routines */
-		log.Printf("dispatch task to worker routines, taskk count - %d\n", count_)
+		log.Printf("dispatch task to worker routines, task count - %d\n", count_)
 
 		for i := 0; i < count_; i += 1 {
 			indexChannel <- i
