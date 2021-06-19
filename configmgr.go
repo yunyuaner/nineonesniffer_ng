@@ -211,11 +211,7 @@ func (confmgr *NineOneConfManager) makeConfigStruct() {
 		if value, ok := confmgr.configMap[configName]; !ok {
 			return defaultNineOneConfig[configName]
 		} else {
-			if strings.Contains(configName, "dir") || strings.Contains(strings.ToLower(configName), "file") {
-				return strings.Replace(value, "/", "\\", -1)
-			} else {
-				return value
-			}
+			return value
 		}
 	}
 
