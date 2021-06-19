@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -259,7 +260,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	}
 
 	now := time.Now()
-	dir := confmgr.config.videoListBaseDir + "/" + now.Format("2006-01-02")
+	dir := filepath.Join(confmgr.config.videoListBaseDir, now.Format("2006-01-02"))
 	if _, err := os.Open(dir); os.IsNotExist(err) {
 		os.MkdirAll(dir, 0755)
 	}
@@ -332,7 +333,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 					successCount += 1
 					observerChannel <- index
 
-					htmlFile := fmt.Sprintf(dir+"/%04d.html", index+1)
+					htmlFile := filepath.Join(dir, fmt.Sprintf("%04d.html", index+1))
 					err = ioutil.WriteFile(htmlFile, info, 0644)
 					if err != nil {
 						log.Fatal(err)
@@ -401,7 +402,7 @@ func (fetcher *nineOneFetcher) fetchThumbnails(script bool) {
 
 	var newThumbnailsCount int
 
-	httpHeadersFile, err := os.Open(confmgr.config.workDir + "/configs/thumbnail_http_headers.txt")
+	httpHeadersFile, err := os.Open(filepath.Join(confmgr.config.workDir, "configs/thumbnail_http_headers.txt"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -508,19 +509,19 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 		return !os.IsNotExist(err), err
 	}
 
-	exist, err := isExist(confmgr.config.videoPartsDescTodoDir + "/" + name)
+	exist, err := isExist(filepath.Join(confmgr.config.videoPartsDescTodoDir, name))
 	if exist {
 		fmt.Printf("video descriptor - %s has already been in the repository, skip now\n", name)
 		return err
 	}
 
-	exist, err = isExist(confmgr.config.videoPartsDescDoneDir + "/" + name)
+	exist, err = isExist(filepath.Join(confmgr.config.videoPartsDescDoneDir, name))
 	if exist {
 		fmt.Printf("video descriptor - %s has already been in the repository, skip now\n", name)
 		return err
 	}
 
-	filename := confmgr.config.videoPartsDescTodoDir + "/" + name
+	filename := filepath.Join(confmgr.config.videoPartsDescTodoDir, name)
 
 	// fmt.Printf("src - %s, filename - %s, useProxy - %v\n", *src, filename, useProxy)
 
@@ -566,13 +567,13 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 					videoPartName := videoPartURL[strings.LastIndex(videoPartURL, "/")+1:]
 
-					dirName := confmgr.config.videoPartsDir + "/" + finalFileName
+					dirName := filepath.Join(confmgr.config.videoPartsDir, finalFileName)
 					_, err := os.Open(dirName)
 					if os.IsNotExist(err) {
 						os.Mkdir(dirName, 0755)
 					}
 
-					name := confmgr.config.videoPartsDir + "/" + finalFileName + "/" + videoPartName
+					name := filepath.Join(confmgr.config.videoPartsDir, finalFileName, videoPartName)
 
 					if err = fetcher.wget(videoPartURL, name, useProxy); err != nil {
 						fmt.Println(err)
@@ -585,7 +586,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 		}
 
 		for j := 0; j < jobCount; j++ {
-			taskURLChannel <- fmt.Sprintf(confmgr.config.videoPartsURLBase+"/%s/%s%d.ts", finalFileName, finalFileName, j)
+			taskURLChannel <- fmt.Sprintf("%s/%s/%s%d.ts", confmgr.config.videoPartsURLBase, finalFileName, finalFileName, j)
 		}
 
 		for n := 0; n < jobCount; n++ {
@@ -597,11 +598,11 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 	/* Merge all the downloaded video parts into one and do transcoding */
 	os.Remove(confmgr.config.videoMergedDir + finalFileName + ".ts")
-	mergedFile, _ := os.OpenFile(confmgr.config.videoMergedDir+"/"+finalFileName+".ts", os.O_CREATE|os.O_WRONLY, 0644)
+	mergedFile, _ := os.OpenFile(filepath.Join(confmgr.config.videoMergedDir, finalFileName+".ts"), os.O_CREATE|os.O_WRONLY, 0644)
 
 	/* TODO: Should resolve the case when some of the video parts are missing */
 	for i := 0; i < filePartsCountInteger; i++ {
-		filePart := fmt.Sprintf("%s/%s/%s%d.ts", confmgr.config.videoPartsDir, finalFileName, finalFileName, i)
+		filePart := filepath.Join(confmgr.config.videoPartsDir, finalFileName, fmt.Sprintf("%s%d.ts", finalFileName, i))
 		f, err := os.Open(filePart)
 		if err != nil {
 			fmt.Println(err)
@@ -625,35 +626,28 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 
 	mergedFile.Close()
 
-	os.Rename(confmgr.config.videoPartsDescTodoDir+"/"+finalFileName+".m3u8", confmgr.config.videoPartsDescDoneDir+"/"+finalFileName+".m3u8")
+	os.Rename(filepath.Join(confmgr.config.videoPartsDescTodoDir, finalFileName+".m3u8"),
+		filepath.Join(confmgr.config.videoPartsDescDoneDir, finalFileName+".m3u8"))
 
 	if fetcher.sniffer.Transcode {
 		var cmd *exec.Cmd
 		cmd = exec.Command("ffmpeg", "-i", confmgr.config.videoMergedDir+"/"+finalFileName+".ts", "-c:v",
-			"h264_qsv", "-c:a", "aac", "-strict", "-2", confmgr.config.videoMergedDir+"/"+finalFileName+".mp4")
+			"libx264", "-c:a", "aac", "-strict", "-2", confmgr.config.videoMergedDir+"/"+finalFileName+".mp4")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err := cmd.Run()
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 
-		kill := exec.Command("taskkill", "/T", "/F", "/IM", "ffmpeg.exe")
-		kill.Env = []string{"PATH=\"C:\\Program Files (x86)\\FormatFactory\""}
-		kill.Run()
+		finalFileNameWithPath := filepath.Join(confmgr.config.videoMergedDir, finalFileName+".ts")
 
-		finalFileNameWithPath := confmgr.config.videoMergedDir + "/" + finalFileName + ".ts"
-
-		if err := os.Remove(confmgr.config.videoMergedDir + "/" + finalFileName + ".ts"); err != nil {
-			fmt.Println(err)
-
-			cmd = exec.Command("cmd.exe", "/C", "del", finalFileNameWithPath)
-			cmd.Run()
-
+		if err := os.Remove(finalFileNameWithPath); err != nil {
+			log.Println(err)
 		}
 
-		if err := os.RemoveAll(confmgr.config.videoPartsDir + "/" + finalFileName); err != nil {
-			fmt.Println(err)
+		if err := os.RemoveAll(filepath.Join(confmgr.config.videoPartsDir, finalFileName)); err != nil {
+			log.Println(err)
 		}
 	}
 }
@@ -672,15 +666,18 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge(useProxy bool) error {
 			descriptorName := info.Name()
 			if strings.Contains(descriptorName, ".mp4") {
 				/* Legacy video files do not have descriptor file */
-				os.Rename(confmgr.config.videoPartsDescTodoDir+"/"+info.Name(), confmgr.config.videoMergedDir+"/"+info.Name())
+				os.Rename(filepath.Join(confmgr.config.videoPartsDescTodoDir, info.Name()),
+					filepath.Join(confmgr.config.videoMergedDir, info.Name()))
 				continue
 			}
 
 			baseName := descriptorName[:len(descriptorName)-len(".m3u8")]
 			fmt.Printf("downloading file - %s\n", info.Name())
 
-			fetcher.fetchVideoPartsByNameWithWorkers(confmgr.config.videoPartsDescTodoDir+"/"+descriptorName, baseName, useProxy)
-			os.Rename(confmgr.config.videoPartsDescTodoDir+"/"+info.Name(), confmgr.config.videoPartsDescDoneDir+"/"+info.Name())
+			fetcher.fetchVideoPartsByNameWithWorkers(filepath.Join(confmgr.config.videoPartsDescTodoDir,
+				descriptorName), baseName, useProxy)
+			os.Rename(filepath.Join(confmgr.config.videoPartsDescTodoDir, info.Name()),
+				filepath.Join(confmgr.config.videoPartsDescDoneDir, info.Name()))
 		}
 	}
 

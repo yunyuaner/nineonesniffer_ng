@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -294,7 +295,7 @@ func (parser *nineOneParser) refreshDataset(dirname string, keep bool) (int, err
 
 	for _, file := range files {
 		if !file.IsDir() {
-			fullpath := dirname + "/" + file.Name()
+			fullpath := filepath.Join(dirname, file.Name())
 			allFiles = append(allFiles, fullpath)
 		}
 	}

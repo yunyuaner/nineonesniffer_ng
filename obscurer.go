@@ -247,7 +247,7 @@ func (obs *obscurer) proxyInvalidate() {
 		log.Printf(err.Error())
 	}
 
-	f, err := os.OpenFile("proxies.txt", os.O_RDWR|os.O_CREATE, 0755)
+	f, err := os.OpenFile("proxies.txt", os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}

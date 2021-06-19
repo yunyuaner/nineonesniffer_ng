@@ -27,7 +27,7 @@ func (sniffer *NineOneSniffer) Init() {
 
 	/* configuration setup */
 	sniffer.confmgr = new(NineOneConfManager)
-	configFile := filepath.Join(workDir, "configs/NineOneSniffer.conf")
+	configFile := filepath.Join(workDir, "configs", "NineOneSniffer.conf")
 	sniffer.confmgr.Start(configFile)
 	// sniffer.confmgr.showConfig()
 

@@ -34,13 +34,13 @@ func (vds *VideoDataSet) save(persister *nineonePersister) {
 			item.Author,
 			item.Duration.String())
 		if err == nil {
-			fmt.Printf("title - %s, author - %s\n", item.Title, item.Author)
+			log.Printf("title - %s, author - %s\n", item.Title, item.Author)
 			newlyAdded++
 		}
 		return true
 	})
 
-	fmt.Printf("%d new items added\n", newlyAdded)
+	log.Printf("%d new items added\n", newlyAdded)
 }
 
 func (vds *VideoDataSet) sync(persister *nineonePersister) {

@@ -21,14 +21,7 @@ var proxyQuery bool
 
 var sniffer *nineonesniffer.NineOneSniffer
 
-const (
-	ffmpegDir = "C:\\Program Files (x86)\\FormatFactory"
-)
-
 func init() {
-	pwd, _ := os.Getwd()
-	os.Setenv("PATH", ffmpegDir+";"+pwd+"\\tools")
-
 	initParameters()
 	sniffer = new(nineonesniffer.NineOneSniffer)
 	sniffer.Init()
