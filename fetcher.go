@@ -484,7 +484,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 		return fmt.Errorf("This video may have been removed, now stop!")
 	}
 
-	if strings.Contains(string(content), "Sorry") {
+	if strings.Contains(string(content), "Sorry") && strings.Contains(string(content), "limit") {
 		return fmt.Errorf("Up limit reached, now stop!")
 	}
 
