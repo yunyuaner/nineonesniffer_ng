@@ -322,6 +322,17 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 			if useProxy {
 				proxy, token, _ = obs.yield()
 				log.Printf("yield proxy - %s, token - %s\n", proxy, token)
+			} else {
+				c, err := fetcher.getCookies(proxy)
+
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+
+				if _, ok := c["covid"]; ok {
+					token = c["covid"]
+				}
 			}
 
 			for {
