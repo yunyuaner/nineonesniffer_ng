@@ -62,18 +62,20 @@ func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, er
 	return fetcher.cookies, nil
 }
 
-func (fetcher *nineOneFetcher) get(url string, socks5Proxy string) (body []byte, err error) {
-	return fetcher.fetchGeneric(url, "GET", nil, socks5Proxy, 30*time.Second, nil, nil)
+func (fetcher *nineOneFetcher) get(url string, cookies []*http.Cookie, socks5Proxy string) (body []byte, err error) {
+	return fetcher.fetchGeneric(url, "GET", nil, cookies, socks5Proxy, 30*time.Second, nil, nil)
 }
 
-func (fetcher *nineOneFetcher) post(url string, formData map[string]string, socks5Proxy string) (body []byte, err error) {
-	return fetcher.fetchGeneric(url, "POST", nil, socks5Proxy, 30*time.Second, nil, nil)
+func (fetcher *nineOneFetcher) post(url string, formData map[string]string,
+	cookies []*http.Cookie, socks5Proxy string) (body []byte, err error) {
+	return fetcher.fetchGeneric(url, "POST", formData, cookies, socks5Proxy, 30*time.Second, nil, nil)
 }
 
 func (fetcher *nineOneFetcher) fetchGeneric(
 	url_ string,
 	method string,
 	formData map[string]string,
+	cookies []*http.Cookie,
 	socks5Proxy string,
 	timeout time.Duration,
 	callback func(resp *http.Response, body []byte, data interface{}) error,
@@ -102,6 +104,12 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		for _, c := range fetcher.cookies {
 			cookie := c
 			req.AddCookie(cookie)
+		}
+	}
+
+	if cookies != nil {
+		for _, c := range cookies {
+			req.AddCookie(c)
 		}
 	}
 
@@ -141,6 +149,9 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		client = &http.Client{
 			Transport: tr,
 			Timeout:   120 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		}
 	} else {
 		tr := &http.Transport{
@@ -169,6 +180,9 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		client = &http.Client{
 			Transport: tr,
 			Timeout:   timeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		}
 	}
 
@@ -177,7 +191,7 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		return nil, err
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 200 && resp.StatusCode != 302 {
 		err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
 		return nil, err
 	}
@@ -196,6 +210,8 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		return nil, err
 	}
 
+	//fmt.Println(string(body))
+
 	if callback != nil {
 		callback(resp, body, data)
 	}
@@ -205,14 +221,16 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 
 func (fetcher *nineOneFetcher) wget(url_ string, outputFile string, useProxy bool) error {
 	var proxy_ string
+
 	if useProxy {
 		obs := fetcher.sniffer.obs
-		proxy_, _ = obs.yield()
+		proxy_, _, _ = obs.yield()
 	}
 
 	_, err := fetcher.fetchGeneric(
 		url_,
 		"GET",
+		nil,
 		nil,
 		proxy_,
 		30*time.Second,
@@ -300,10 +318,10 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	/* Step 2: launch worker routines */
 	for i := 0; i < concurrentRtnCount; i += 1 {
 		go func() {
-			proxy := ""
+			var proxy, token string
 			if useProxy {
-				proxy, _ = obs.yield()
-				log.Printf("yield proxy - %s\n", proxy)
+				proxy, token, _ = obs.yield()
+				log.Printf("yield proxy - %s, token - %s\n", proxy, token)
 			}
 
 			for {
@@ -315,9 +333,9 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 				}
 
 				src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
-				log.Printf("proxy - %s, src - %s\n", proxy, src)
+				log.Printf("siteToken - %s, proxy - %s, src - %s\n", token, proxy, src)
 
-				if info, err := fetcher.get(src, proxy); err != nil {
+				if info, err := fetcher.get(src, []*http.Cookie{&http.Cookie{Name: "covid", Value: token}}, proxy); err != nil {
 					failCount += 1
 					failIndexList = append(failIndexList, index)
 
@@ -468,14 +486,51 @@ func (fetcher *nineOneFetcher) fetchThumbnails(script bool) {
 func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool, useProxy bool) error {
 	confmgr := fetcher.sniffer.confmgr
 
+	var cookies []*http.Cookie
+	var proxy_, token_ string
+
 	if len(url) == 0 {
 		return fmt.Errorf("url shouldn't be empty")
 	}
 
-	obs := fetcher.sniffer.obs
-	proxy_, _ := obs.yield()
+	if useProxy {
+		obs := fetcher.sniffer.obs
+		proxy_, token_, _ = obs.yield()
 
-	content, err := fetcher.get(url, proxy_)
+		cookies = []*http.Cookie{
+			&http.Cookie{
+				Name:     "covid",
+				Value:    token_,
+				HttpOnly: true,
+				Path:     "/",
+				Domain:   "www.91porn.com",
+			},
+		}
+		fmt.Printf("siteToken - %s\n", token_)
+	} else {
+		c, err := fetcher.getCookies(proxy_)
+
+		if err != nil {
+			return err
+		}
+
+		if _, ok := c["covid"]; ok {
+			cookies = []*http.Cookie{
+				&http.Cookie{
+					Name:     "covid",
+					Value:    c["covid"],
+					HttpOnly: true,
+					Path:     "/",
+					Domain:   "www.91porn.com",
+				},
+			}
+			fmt.Printf("siteToken - %s\n", c["covid"])
+		} else {
+			return fmt.Errorf("no site token found, will be rejected, just return now")
+		}
+	}
+
+	content, err := fetcher.get(url, cookies, proxy_)
 	if err != nil {
 		return err
 	}
@@ -725,4 +780,42 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string,
 	length, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
 	lastModifiedTime := resp.Header.Get("Last-Modified")
 	return length, lastModifiedTime, nil
+}
+
+func (fetcher *nineOneFetcher) getCookies(proxy string) (cookies map[string]string, err error) {
+	f := func(resp *http.Response, body []byte, data interface{}) error {
+		respCookies := data.(*map[string]string)
+
+		c := resp.Cookies()
+
+		for _, c_ := range c {
+			(*respCookies)[c_.Name] = c_.Value
+		}
+
+		//fmt.Println(respCookies)
+		//fmt.Println(resp.Header.Values("Set-Cookie"))
+
+		return nil
+	}
+
+	cookies = make(map[string]string)
+
+	_, err = fetcher.fetchGeneric(
+		"http://www.91porn.com/v.php?next=watch&page=1",
+		"GET",
+		nil,
+		nil,
+		proxy,
+		30*time.Second,
+		f,
+		&cookies,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println(cookies)
+
+	return cookies, nil
 }
