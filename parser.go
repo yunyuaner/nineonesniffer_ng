@@ -320,20 +320,22 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 	}
 
 	/* Step 5: retry the failed tasks*/
-	var originalFailedItems []*partial
-	originalFailedItems = append(originalFailedItems, failedItems...)
+	/*
+		var originalFailedItems []*partial
+		originalFailedItems = append(originalFailedItems, failedItems...)
 
-	if len(originalFailedItems) > 0 {
-		log.Printf("retry the failed tasks, count - %d\n", len(originalFailedItems))
+		if len(originalFailedItems) > 0 {
+			log.Printf("retry the failed tasks, count - %d\n", len(originalFailedItems))
 
-		for _, item := range originalFailedItems {
-			taskChannel <- item
+			for _, item := range originalFailedItems {
+				taskChannel <- item
+			}
+
+			for i := 0; i < len(originalFailedItems); i++ {
+				<-doneChannel
+			}
 		}
-
-		for i := 0; i < len(originalFailedItems); i++ {
-			<-doneChannel
-		}
-	}
+	*/
 
 	log.Println("close task channel")
 	close(taskChannel)
