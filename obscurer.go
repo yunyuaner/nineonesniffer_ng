@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -24,26 +25,33 @@ type obscurer struct {
 	sniffer *NineOneSniffer
 }
 
-func (obs *obscurer) yield() (string, string, error) {
+func (obs *obscurer) yieldWithCookies() (string, []*http.Cookie, error) {
 	fetcher := obs.sniffer.fetcher
 
 	for _, item := range obs.proxies {
 		if !item.inUse {
 			item.inUse = true
-			cookies, err := fetcher.getCookies(item.proxy)
+			siteToken, err := fetcher.getSiteToken(item.proxy)
 			if err != nil {
 				continue
 			}
 
-			if _, ok := cookies["covid"]; ok {
-				return item.proxy, cookies["covid"], nil
-			} else {
-				continue
-			}
+			return item.proxy, siteToken, nil
 		}
 	}
 
-	return "", "", fmt.Errorf("Not more proxy available")
+	return "", nil, fmt.Errorf("No more proxy available")
+}
+
+func (obs *obscurer) yield() (string, error) {
+	for _, item := range obs.proxies {
+		if !item.inUse {
+			item.inUse = true
+			return item.proxy, nil
+		}
+	}
+
+	return "", fmt.Errorf("No more proxy available")
 }
 
 func (obs *obscurer) release(proxy string) {

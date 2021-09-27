@@ -224,58 +224,114 @@ type partial struct {
 }
 
 /* Query video uploaded date using http header 'Last-Modified' */
-func (parser *nineOneParser) identifyVideoUploadedDate() {
+func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 	/* Query from database and find the video items that has no upload_date yet */
-	// rows, err := db.Query("select thumbnail_id, thumbnail from VideoListTable where upload_date is null")
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// var partialist []partial
-
-	// for rows.Next() {
-	// 	var thumbnailID int
-	// 	var thumbnail string
-
-	// 	err = rows.Scan(&thumbnailID, &thumbnail)
-	// 	if err != nil {
-	// 		log.Print(err)
-	// 		continue
-	// 	}
-	// 	partialist = append(partialist, partial{thumbnail_id: thumbnailID, thumbnail: thumbnail})
-	// }
-
 	persister := parser.sniffer.persister
 	fetcher := parser.sniffer.fetcher
+	obs := parser.sniffer.obs
+
 	partialist, _ := persister.queryVideoItemsWithoutUploadDate()
 
-	fmt.Printf("\rGot %d items \n", len(partialist))
-
-	failcount := 0
-
-	for _, item := range partialist {
-		_, lastModified, err := fetcher.queryHttpResourceLength(item.thumbnail)
-		if err != nil {
-			fmt.Printf("Failed to query timestamp from video item %d\n", item.thumbnail_id)
-			failcount = failcount + 1
-			if failcount >= 10 {
-				fmt.Printf("Something went wrong, will quit now, you may try it later\n")
-				break
-			}
-			continue
-		}
-		t, err := time.Parse(time.RFC1123, lastModified)
-		item.uploaded_date = t
-		item.valid = true
-		fmt.Printf("video item - %d, uploaded_date - %v\n", item.thumbnail_id, item.uploaded_date)
-
-		if err := persister.updateVideoUploadDate(item.uploaded_date, item.thumbnail_id); err != nil {
-			fmt.Printf("persist video item %d fail: %v\n", item.thumbnail_id, err)
-		} else {
-			fmt.Printf("persist video item %d done\n", item.thumbnail_id)
-		}
-
+	fmt.Printf("Got %d items \n", len(partialist))
+	if len(partialist) == 0 {
+		return
 	}
+
+	var maxConcurrentRtn int
+	doneChannel := make(chan struct{})
+	taskChannel := make(chan *partial)
+	observerChannel := make(chan string)
+
+	var failedItems []*partial
+
+	if useProxy {
+		maxConcurrentRtn = obs.count()
+	} else {
+		maxConcurrentRtn = 1
+	}
+
+	/* Step 1: launch observer routine */
+	go func() {
+		for {
+			message, ok := <-observerChannel
+			if !ok {
+				break
+			} else {
+				log.Println(message)
+			}
+		}
+	}()
+
+	/* Step 2: launch worker routines */
+	for i := 0; i < maxConcurrentRtn; i += 1 {
+		go func() {
+			var proxy_ string
+
+			if useProxy {
+				proxy_, _ = obs.yield()
+			}
+
+			for {
+				item, ok := <-taskChannel
+				if !ok {
+					break
+				}
+
+				lastModified, err := fetcher.queryHttpResourceDate((*item).thumbnail, proxy_)
+				if err != nil {
+					observerChannel <- fmt.Sprintf("Failed to query timestamp from video item %d", (*item).thumbnail_id)
+					failedItems = append(failedItems, item)
+					doneChannel <- struct{}{}
+					return
+				}
+
+				t, err := time.Parse(time.RFC1123, lastModified)
+				(*item).uploaded_date = t
+				(*item).valid = true
+				observerChannel <- fmt.Sprintf("video item - %d, uploaded_date - %v", (*item).thumbnail_id, (*item).uploaded_date)
+
+				if err := persister.updateVideoUploadDate((*item).uploaded_date, (*item).thumbnail_id); err != nil {
+					observerChannel <- fmt.Sprintf("persist video item %d fail: %v", (*item).thumbnail_id, err)
+				} else {
+					observerChannel <- fmt.Sprintf("persist video item %d done", (*item).thumbnail_id)
+				}
+
+				doneChannel <- struct{}{}
+			}
+		}()
+	}
+
+	/* Step 3: dispatch task to worker routines */
+	go func() {
+		log.Printf("dispatch task to worker routines, task count - %d\n", len(partialist))
+
+		for i := 0; i < len(partialist); i++ {
+			taskChannel <- &partialist[i]
+		}
+	}()
+
+	/* Step 4: wait till all the tasks have been proceed, no matter succeed or not */
+	for i := 0; i < len(partialist); i += 1 {
+		<-doneChannel
+	}
+
+	/* Step 5: retry the failed tasks*/
+	if len(failedItems) > 0 {
+		log.Println("retry the failed tasks")
+
+		for _, item := range failedItems {
+			taskChannel <- item
+		}
+
+		for i := 0; i < len(failedItems); i++ {
+			<-doneChannel
+		}
+	}
+
+	log.Println("close task channel")
+	close(taskChannel)
+	log.Println("close observer channel")
+	close(observerChannel)
 }
 
 func (parser *nineOneParser) refreshDataset(dirname string, keep bool) (int, error) {

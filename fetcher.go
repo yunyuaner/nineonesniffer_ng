@@ -24,6 +24,10 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+const (
+	siteTokenName = "covid"
+)
+
 type nineOneFetcher struct {
 	sniffer   *NineOneSniffer
 	cookies   []*http.Cookie
@@ -71,6 +75,17 @@ func (fetcher *nineOneFetcher) post(url string, formData map[string]string,
 	return fetcher.fetchGeneric(url, "POST", formData, cookies, socks5Proxy, 30*time.Second, nil, nil)
 }
 
+func (fetcher *nineOneFetcher) head(
+	url string,
+	cookies []*http.Cookie,
+	socks5Proxy string,
+	callback func(resp *http.Response, body []byte, data interface{}) error,
+	data interface{},
+) error {
+	_, err := fetcher.fetchGeneric(url, "HEAD", nil, cookies, socks5Proxy, 30*time.Second, callback, data)
+	return err
+}
+
 func (fetcher *nineOneFetcher) fetchGeneric(
 	url_ string,
 	method string,
@@ -88,6 +103,8 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 	var client *http.Client
 	var useHttps, useProxy bool
 	var contextDialer proxy.ContextDialer
+
+	//fmt.Printf("src - %s\n", url_)
 
 	if strings.ToLower(method) == "post" && formData != nil && len(formData) > 0 {
 		form := url.Values{}
@@ -224,7 +241,7 @@ func (fetcher *nineOneFetcher) wget(url_ string, outputFile string, useProxy boo
 
 	if useProxy {
 		obs := fetcher.sniffer.obs
-		proxy_, _, _ = obs.yield()
+		proxy_, _, _ = obs.yieldWithCookies()
 	}
 
 	_, err := fetcher.fetchGeneric(
@@ -318,20 +335,23 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	/* Step 2: launch worker routines */
 	for i := 0; i < concurrentRtnCount; i += 1 {
 		go func() {
-			var proxy, token string
-			if useProxy {
-				proxy, token, _ = obs.yield()
-				log.Printf("yield proxy - %s, token - %s\n", proxy, token)
-			} else {
-				c, err := fetcher.getCookies(proxy)
+			var proxy string
+			var siteToken []*http.Cookie
 
+			if useProxy {
+				proxy, siteToken, err = obs.yieldWithCookies()
 				if err != nil {
 					fmt.Println(err)
 					return
 				}
 
-				if _, ok := c["covid"]; ok {
-					token = c["covid"]
+				log.Printf("yield proxy - %s\n", proxy)
+			} else {
+				siteToken, err = fetcher.getSiteToken(proxy)
+
+				if err != nil {
+					fmt.Println(err)
+					return
 				}
 			}
 
@@ -344,9 +364,9 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 				}
 
 				src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
-				log.Printf("siteToken - %s, proxy - %s, src - %s\n", token, proxy, src)
+				log.Printf("proxy - %s, src - %s\n", proxy, src)
 
-				if info, err := fetcher.get(src, []*http.Cookie{&http.Cookie{Name: "covid", Value: token}}, proxy); err != nil {
+				if info, err := fetcher.get(src, siteToken, proxy); err != nil {
 					failCount += 1
 					failIndexList = append(failIndexList, index)
 
@@ -494,11 +514,11 @@ func (fetcher *nineOneFetcher) fetchThumbnails(script bool) {
 	//os.Remove("./thumbnails_dl.sh")
 }
 
-func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool, useProxy bool) error {
+func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool, useProxy bool) (err error) {
 	confmgr := fetcher.sniffer.confmgr
 
-	var cookies []*http.Cookie
-	var proxy_, token_ string
+	var proxy_ string
+	var siteToken []*http.Cookie
 
 	if len(url) == 0 {
 		return fmt.Errorf("url shouldn't be empty")
@@ -506,42 +526,19 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 
 	if useProxy {
 		obs := fetcher.sniffer.obs
-		proxy_, token_, _ = obs.yield()
-
-		cookies = []*http.Cookie{
-			&http.Cookie{
-				Name:     "covid",
-				Value:    token_,
-				HttpOnly: true,
-				Path:     "/",
-				Domain:   "www.91porn.com",
-			},
+		proxy_, siteToken, err = obs.yieldWithCookies()
+		if err != nil {
+			return err
 		}
-		fmt.Printf("siteToken - %s\n", token_)
 	} else {
-		c, err := fetcher.getCookies(proxy_)
+		siteToken, err = fetcher.getSiteToken(proxy_)
 
 		if err != nil {
 			return err
 		}
-
-		if _, ok := c["covid"]; ok {
-			cookies = []*http.Cookie{
-				&http.Cookie{
-					Name:     "covid",
-					Value:    c["covid"],
-					HttpOnly: true,
-					Path:     "/",
-					Domain:   "www.91porn.com",
-				},
-			}
-			fmt.Printf("siteToken - %s\n", c["covid"])
-		} else {
-			return fmt.Errorf("no site token found, will be rejected, just return now")
-		}
 	}
 
-	content, err := fetcher.get(url, cookies, proxy_)
+	content, err := fetcher.get(url, siteToken, proxy_)
 	if err != nil {
 		return err
 	}
@@ -750,7 +747,8 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge(useProxy bool) error {
 	return nil
 }
 
-func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string, error) {
+/*
+func (fetcher *nineOneFetcher) queryHttpResourceLengthAndDate(url string) (int, string, error) {
 	cfg := &tls.Config{
 		MinVersion:               tls.VersionTLS12,
 		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
@@ -792,6 +790,35 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string,
 	lastModifiedTime := resp.Header.Get("Last-Modified")
 	return length, lastModifiedTime, nil
 }
+*/
+
+func (fetcher *nineOneFetcher) queryHttpResourceLength(url string, proxy string) (int, error) {
+	var length int
+
+	f := func(resp *http.Response, body []byte, data interface{}) error {
+		l := data.(*int)
+		*l, _ = strconv.Atoi(resp.Header.Get("Content-Length"))
+		return nil
+	}
+
+	err := fetcher.head(url, nil, proxy, f, &length)
+
+	return length, err
+}
+
+func (fetcher *nineOneFetcher) queryHttpResourceDate(url string, proxy string) (string, error) {
+	var lastModifiedTime string
+
+	f := func(resp *http.Response, body []byte, data interface{}) error {
+		t := data.(*string)
+		*t = resp.Header.Get("Last-Modified")
+		return nil
+	}
+
+	err := fetcher.head(url, nil, proxy, f, &lastModifiedTime)
+
+	return lastModifiedTime, err
+}
 
 func (fetcher *nineOneFetcher) getCookies(proxy string) (cookies map[string]string, err error) {
 	f := func(resp *http.Response, body []byte, data interface{}) error {
@@ -810,9 +837,10 @@ func (fetcher *nineOneFetcher) getCookies(proxy string) (cookies map[string]stri
 	}
 
 	cookies = make(map[string]string)
+	confmgr := fetcher.sniffer.confmgr
 
 	_, err = fetcher.fetchGeneric(
-		"http://www.91porn.com/v.php?next=watch&page=1",
+		confmgr.config.listPageURLBase+"1",
 		"GET",
 		nil,
 		nil,
@@ -826,7 +854,32 @@ func (fetcher *nineOneFetcher) getCookies(proxy string) (cookies map[string]stri
 		return nil, err
 	}
 
-	fmt.Println(cookies)
+	//fmt.Println(cookies)
 
 	return cookies, nil
+}
+
+func (fetcher *nineOneFetcher) getSiteToken(proxy string) (siteToken []*http.Cookie, err error) {
+	c, err := fetcher.getCookies(proxy)
+	confmgr := fetcher.sniffer.confmgr
+
+	if err != nil {
+		return nil, err
+	}
+
+	if _, ok := c["covid"]; ok {
+		siteToken = []*http.Cookie{
+			&http.Cookie{
+				Name:     siteTokenName,
+				Value:    c[siteTokenName],
+				HttpOnly: true,
+				Path:     "/",
+				Domain:   confmgr.config.baseURL,
+			},
+		}
+		fmt.Printf("siteToken - %s\n", c[siteTokenName])
+		return siteToken, nil
+	} else {
+		return nil, fmt.Errorf("no site token found, will be rejected, just return now")
+	}
 }

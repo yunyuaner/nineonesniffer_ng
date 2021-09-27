@@ -58,7 +58,7 @@ func showHelp(name string) {
 	fmt.Printf("%s%s -mode sync -count num [-proxy] [-keep]\n", doubleTab, name)
 
 	fmt.Printf("%sIdentify video uploaded date\n", tab)
-	fmt.Printf("%s%s -mode identify_date\n", doubleTab, name)
+	fmt.Printf("%s%s -mode identify_date [-proxy]\n", doubleTab, name)
 }
 
 func main() {
@@ -85,7 +85,7 @@ func main() {
 		sniffer.Persist()
 
 	case "identify_date":
-		sniffer.IdentifyVideoUploadedDate()
+		sniffer.IdentifyVideoUploadedDate(proxy)
 
 	case "dl_desc":
 		if len(url) == 0 {
