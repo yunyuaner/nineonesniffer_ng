@@ -282,21 +282,24 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 					observerChannel <- fmt.Sprintf("proxy - %s failed to query timestamp from video item %d: %v",
 						proxy_, (*item).thumbnail_id, err)
 					failedItems = append(failedItems, item)
-					doneChannel <- struct{}{}
-					return
-				}
-
-				t, err := time.Parse(time.RFC1123, lastModified)
-				(*item).uploaded_date = t
-				(*item).valid = true
-				observerChannel <- fmt.Sprintf("video item - %d, uploaded_date - %v", (*item).thumbnail_id, (*item).uploaded_date)
-
-				if err := persister.updateVideoUploadDate((*item).uploaded_date, (*item).thumbnail_id); err != nil {
-					observerChannel <- fmt.Sprintf("persist video item %d fail: %v", (*item).thumbnail_id, err)
 				} else {
-					observerChannel <- fmt.Sprintf("persist video item %d done", (*item).thumbnail_id)
-				}
+					t, err := time.Parse(time.RFC1123, lastModified)
+					if err != nil {
+						observerChannel <- fmt.Sprintf("%v", err)
+						doneChannel <- struct{}{}
+						continue
+					}
 
+					(*item).uploaded_date = t
+					(*item).valid = true
+					observerChannel <- fmt.Sprintf("video item - %d, uploaded_date - %v", (*item).thumbnail_id, (*item).uploaded_date)
+
+					if err := persister.updateVideoUploadDate((*item).uploaded_date, (*item).thumbnail_id); err != nil {
+						observerChannel <- fmt.Sprintf("persist video item %d fail: %v", (*item).thumbnail_id, err)
+					} else {
+						observerChannel <- fmt.Sprintf("persist video item %d done", (*item).thumbnail_id)
+					}
+				}
 				doneChannel <- struct{}{}
 			}
 		}()
