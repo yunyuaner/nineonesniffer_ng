@@ -277,7 +277,8 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 					break
 				}
 
-				lastModified, err := fetcher.queryHttpResourceDate((*item).thumbnail, proxy_)
+				thumbnail := strings.Replace((*item).thumbnail, "https", "http", 1)
+				lastModified, err := fetcher.queryHttpResourceDate(thumbnail, proxy_)
 				if err != nil {
 					observerChannel <- fmt.Sprintf("proxy - %s failed to query timestamp from video item %d: %v",
 						proxy_, (*item).thumbnail_id, err)
