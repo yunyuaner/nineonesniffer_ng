@@ -301,9 +301,11 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	}
 
 	var concurrentRtnCount, maxConcurrentRtn int
-	doneChannel := make(chan struct{})
+	workerDoneChannel := make(chan struct{})
+	jobDoneChannel := make(chan struct{})
+
 	indexChannel := make(chan int)
-	observerChannel := make(chan int)
+	observerChannel := make(chan string)
 
 	var failCount int
 	var successCount int
@@ -322,12 +324,11 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	/* Step 1: launch observer routine */
 	go func() {
 		for {
-			index, ok := <-observerChannel
+			message, ok := <-observerChannel
 			if !ok {
 				break
 			} else {
-				log.Printf("Threads - %2d, Latest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d\n",
-					concurrentRtnCount, index, count, successCount, failCount)
+				log.Println(message)
 			}
 		}
 	}()
@@ -339,18 +340,27 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 			var siteToken []*http.Cookie
 
 			if useProxy {
-				proxy, siteToken, err = obs.yieldWithCookies()
+				proxy, err = obs.yield()
 				if err != nil {
-					fmt.Println(err)
+					observerChannel <- fmt.Sprintf("%v", err)
+					workerDoneChannel <- struct{}{}
 					return
 				}
 
-				log.Printf("yield proxy - %s\n", proxy)
+				siteToken, err = fetcher.getSiteToken(proxy)
+				if err != nil {
+					observerChannel <- fmt.Sprintf("%v", err)
+					workerDoneChannel <- struct{}{}
+					return
+				}
+
+				observerChannel <- fmt.Sprintf("yield proxy - %s", proxy)
 			} else {
 				siteToken, err = fetcher.getSiteToken(proxy)
 
 				if err != nil {
-					fmt.Println(err)
+					observerChannel <- fmt.Sprintf("%v", err)
+					workerDoneChannel <- struct{}{}
 					return
 				}
 			}
@@ -358,13 +368,13 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 			for {
 				index, ok := <-indexChannel
 				if !ok {
-					doneChannel <- struct{}{}
-					obs.release(proxy)
+					workerDoneChannel <- struct{}{}
+					//obs.release(proxy)
 					break
 				}
 
 				src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
-				log.Printf("proxy - %s, src - %s\n", proxy, src)
+				observerChannel <- fmt.Sprintf("proxy - %s, src - %s", proxy, src)
 
 				if info, err := fetcher.get(src, siteToken, proxy); err != nil {
 					failCount += 1
@@ -372,56 +382,62 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 
 					/* if failed, exit */
 					concurrentRtnCount -= 1
-					obs.release(proxy)
+					//obs.release(proxy)
 
-					log.Printf("proxy - %s fail, exit\n", proxy)
-					doneChannel <- struct{}{}
+					observerChannel <- fmt.Sprintf("proxy - %s fail, exit", proxy)
+					indexChannel <- index
+					workerDoneChannel <- struct{}{}
 					break
 				} else {
-					/* TODO: return result may be banned */
 					successCount += 1
-					observerChannel <- index
+					observerChannel <- fmt.Sprintf("Threads - %2d, Latest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d",
+						concurrentRtnCount, index, count, successCount, failCount)
 
 					htmlFile := filepath.Join(dir, fmt.Sprintf("%04d.html", index+1))
 					err = ioutil.WriteFile(htmlFile, info, 0644)
 					if err != nil {
 						log.Fatal(err)
 					}
+					jobDoneChannel <- struct{}{}
 				}
 			}
 		}()
 	}
 
+	/* Step 3: dispatch task to worker routines */
 	go func(count_ int) {
-		/* Step 3: dispatch task to worker routines */
 		log.Printf("dispatch task to worker routines, task count - %d\n", count_)
 
 		for i := 0; i < count_; i += 1 {
 			indexChannel <- i
 		}
-
-		/* Step 4 (Optional): retry the failed tasks*/
-		log.Println("retry the failed tasks")
-
-		if len(failIndexList) > 0 {
-			for _, index := range failIndexList {
-				indexChannel <- index
-			}
-		}
-
-		log.Println("close index channel")
-		close(indexChannel)
 	}(count)
 
-	/* Step 5: wait till all the worker routines have been finished */
-	for i := 0; i < maxConcurrentRtn; i += 1 {
-		<-doneChannel
-		log.Printf("done channels - [ %2d of %2d ]\n", i+1, maxConcurrentRtn)
+	/* Step 4: wait for all jobs been done or all workers terminated */
+	var workerDoneCount, jobDoneCount int
+	for {
+		select {
+		case <-workerDoneChannel:
+			workerDoneCount++
+			observerChannel <- fmt.Sprintf("done workerss - [ %2d of %2d ]", workerDoneCount, maxConcurrentRtn)
+
+		case <-jobDoneChannel:
+			jobDoneCount++
+		}
+
+		if workerDoneCount == maxConcurrentRtn || jobDoneCount == count {
+			break
+		}
 	}
 
 	log.Println("close observer channel")
 	close(observerChannel)
-	// log.Printf("\n")
+
+	log.Println("worker done channel")
+	close(workerDoneChannel)
+
+	log.Println("job done channel")
+	close(jobDoneChannel)
 
 	return dir, nil
 }
