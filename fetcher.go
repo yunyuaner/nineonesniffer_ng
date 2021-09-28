@@ -368,7 +368,7 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 			for {
 				index, ok := <-indexChannel
 				if !ok {
-					workerDoneChannel <- struct{}{}
+					//workerDoneChannel <- struct{}{}
 					//obs.release(proxy)
 					break
 				}
