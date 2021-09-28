@@ -238,11 +238,12 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 	}
 
 	var maxConcurrentRtn int
-	doneChannel := make(chan struct{})
+
+	workerDoneChannel := make(chan struct{})
+	jobDoneChannel := make(chan struct{})
+
 	taskChannel := make(chan *partial)
 	observerChannel := make(chan string)
-
-	var failedItems []*partial
 
 	if useProxy {
 		maxConcurrentRtn = obs.count()
@@ -282,12 +283,14 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 				if err != nil {
 					observerChannel <- fmt.Sprintf("proxy - %s failed to query timestamp from video item %d: %v",
 						proxy_, (*item).thumbnail_id, err)
-					failedItems = append(failedItems, item)
+					taskChannel <- item
+					workerDoneChannel <- struct{}{}
+					break
 				} else {
 					t, err := time.Parse(time.RFC1123, lastModified)
 					if err != nil {
 						observerChannel <- fmt.Sprintf("%v", err)
-						doneChannel <- struct{}{}
+						taskChannel <- item
 						continue
 					}
 
@@ -301,7 +304,8 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 						observerChannel <- fmt.Sprintf("persist video item %d done", (*item).thumbnail_id)
 					}
 				}
-				doneChannel <- struct{}{}
+
+				jobDoneChannel <- struct{}{}
 			}
 		}()
 	}
@@ -315,10 +319,24 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 		}
 	}()
 
-	/* Step 4: wait till all the tasks have been proceed, no matter succeed or not */
-	for i := 0; i < len(partialist); i += 1 {
-		<-doneChannel
+	/* Step 4: wait for all jobs been done or all workers terminated */
+	var workerDoneCount, jobDoneCount int
+	for {
+		select {
+		case <-workerDoneChannel:
+			workerDoneCount++
+
+		case <-jobDoneChannel:
+			jobDoneCount++
+		}
+
+		if workerDoneCount == maxConcurrentRtn || jobDoneCount == len(partialist) {
+			break
+		}
 	}
+	//for i := 0; i < len(partialist); i += 1 {
+	//	<-doneChannel
+	//}
 
 	/* Step 5: retry the failed tasks*/
 	/*
