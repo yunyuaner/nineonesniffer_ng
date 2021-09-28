@@ -334,32 +334,18 @@ func (parser *nineOneParser) identifyVideoUploadedDate(useProxy bool) {
 			break
 		}
 	}
-	//for i := 0; i < len(partialist); i += 1 {
-	//	<-doneChannel
-	//}
-
-	/* Step 5: retry the failed tasks*/
-	/*
-		var originalFailedItems []*partial
-		originalFailedItems = append(originalFailedItems, failedItems...)
-
-		if len(originalFailedItems) > 0 {
-			log.Printf("retry the failed tasks, count - %d\n", len(originalFailedItems))
-
-			for _, item := range originalFailedItems {
-				taskChannel <- item
-			}
-
-			for i := 0; i < len(originalFailedItems); i++ {
-				<-doneChannel
-			}
-		}
-	*/
 
 	log.Println("close task channel")
 	close(taskChannel)
+
 	log.Println("close observer channel")
 	close(observerChannel)
+
+	log.Println("close worker done channel")
+	close(workerDoneChannel)
+
+	log.Println("close job done channel")
+	close(jobDoneChannel)
 }
 
 func (parser *nineOneParser) refreshDataset(dirname string, keep bool) (int, error) {

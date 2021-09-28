@@ -433,6 +433,9 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	log.Println("close observer channel")
 	close(observerChannel)
 
+	log.Println("close index channel")
+	close(indexChannel)
+
 	log.Println("worker done channel")
 	close(workerDoneChannel)
 
