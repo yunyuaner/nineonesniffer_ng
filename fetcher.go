@@ -886,19 +886,15 @@ func (fetcher *nineOneFetcher) getSiteToken(proxy string) (siteToken []*http.Coo
 		return nil, err
 	}
 
-	if _, ok := c["covid87"]; ok {
-		siteToken = []*http.Cookie{
-			&http.Cookie{
-				Name:     siteTokenName,
-				Value:    c[siteTokenName],
-				HttpOnly: true,
-				Path:     "/",
-				Domain:   confmgr.config.baseURL,
-			},
-		}
-		fmt.Printf("siteToken - %s\n", c[siteTokenName])
-		return siteToken, nil
-	} else {
-		return nil, fmt.Errorf("no site token found, will be rejected, just return now")
+	for k, v := range c {
+		siteToken = append(siteToken, &http.Cookie{
+			Name:     k,
+			Value:    v,
+			HttpOnly: true,
+			Path:     "/",
+			Domain:   confmgr.config.baseURL,
+		})
 	}
+
+	return siteToken, nil
 }
