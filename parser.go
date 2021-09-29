@@ -392,52 +392,6 @@ func (parser *nineOneParser) refreshDataset(dirname string, keep bool) (int, err
 	return len(allFiles), nil
 }
 
-func (parser *nineOneParser) scriptGenerate() (int, error) {
-	const dirname = "tmp/data/list"
-
-	f, err := os.Open(dirname)
-	if err != nil {
-		return 0, err
-	}
-
-	defer f.Close()
-
-	files, err := f.Readdir(0)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, file := range files {
-		if !file.IsDir() {
-			fullpath := dirname + "/" + file.Name()
-			fmt.Println("process file - ", fullpath)
-			parser.parseVideoList(fullpath)
-		}
-	}
-
-	script, err := os.OpenFile("./fetch_script.sh", os.O_CREATE|os.O_WRONLY, 0755)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer script.Close()
-
-	vds := parser.sniffer.vds
-	vds.iterate(func(item *VideoItem) bool {
-		line := fmt.Sprintf("wget --tries=10 -O ./tmp/data/images/%s %s\n",
-			item.ThumbnailName, item.ThumbnailURL)
-
-		if _, err := script.Write([]byte(line)); err != nil {
-			f.Close()
-			return false
-		}
-
-		return true
-	})
-
-	return len(files), nil
-}
-
 func (parser *nineOneParser) extract(fileContent string) (string, error) {
 	r := regexp.MustCompile(`document.write\(strencode2\(.*\)\);`)
 	info := r.FindString(string(fileContent))
