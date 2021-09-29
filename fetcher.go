@@ -24,6 +24,10 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+const (
+	siteTokenName = "covid"
+)
+
 type nineOneFetcher struct {
 	sniffer   *NineOneSniffer
 	cookies   []*http.Cookie
@@ -62,18 +66,31 @@ func (fetcher *nineOneFetcher) parseCookies(filename string) ([]*http.Cookie, er
 	return fetcher.cookies, nil
 }
 
-func (fetcher *nineOneFetcher) get(url string, socks5Proxy string) (body []byte, err error) {
-	return fetcher.fetchGeneric(url, "GET", nil, socks5Proxy, 30*time.Second, nil, nil)
+func (fetcher *nineOneFetcher) get(url string, cookies []*http.Cookie, socks5Proxy string) (body []byte, err error) {
+	return fetcher.fetchGeneric(url, "GET", nil, cookies, socks5Proxy, 30*time.Second, nil, nil)
 }
 
-func (fetcher *nineOneFetcher) post(url string, formData map[string]string, socks5Proxy string) (body []byte, err error) {
-	return fetcher.fetchGeneric(url, "POST", nil, socks5Proxy, 30*time.Second, nil, nil)
+func (fetcher *nineOneFetcher) post(url string, formData map[string]string,
+	cookies []*http.Cookie, socks5Proxy string) (body []byte, err error) {
+	return fetcher.fetchGeneric(url, "POST", formData, cookies, socks5Proxy, 30*time.Second, nil, nil)
+}
+
+func (fetcher *nineOneFetcher) head(
+	url string,
+	cookies []*http.Cookie,
+	socks5Proxy string,
+	callback func(resp *http.Response, body []byte, data interface{}) error,
+	data interface{},
+) error {
+	_, err := fetcher.fetchGeneric(url, "HEAD", nil, cookies, socks5Proxy, 30*time.Second, callback, data)
+	return err
 }
 
 func (fetcher *nineOneFetcher) fetchGeneric(
 	url_ string,
 	method string,
 	formData map[string]string,
+	cookies []*http.Cookie,
 	socks5Proxy string,
 	timeout time.Duration,
 	callback func(resp *http.Response, body []byte, data interface{}) error,
@@ -86,6 +103,8 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 	var client *http.Client
 	var useHttps, useProxy bool
 	var contextDialer proxy.ContextDialer
+
+	//fmt.Printf("src - %s\n", url_)
 
 	if strings.ToLower(method) == "post" && formData != nil && len(formData) > 0 {
 		form := url.Values{}
@@ -102,6 +121,12 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		for _, c := range fetcher.cookies {
 			cookie := c
 			req.AddCookie(cookie)
+		}
+	}
+
+	if cookies != nil {
+		for _, c := range cookies {
+			req.AddCookie(c)
 		}
 	}
 
@@ -141,6 +166,9 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		client = &http.Client{
 			Transport: tr,
 			Timeout:   120 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		}
 	} else {
 		tr := &http.Transport{
@@ -169,6 +197,9 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		client = &http.Client{
 			Transport: tr,
 			Timeout:   timeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		}
 	}
 
@@ -177,7 +208,7 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		return nil, err
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 200 && resp.StatusCode != 302 {
 		err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
 		return nil, err
 	}
@@ -196,6 +227,8 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		return nil, err
 	}
 
+	//fmt.Println(string(body))
+
 	if callback != nil {
 		callback(resp, body, data)
 	}
@@ -205,14 +238,16 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 
 func (fetcher *nineOneFetcher) wget(url_ string, outputFile string, useProxy bool) error {
 	var proxy_ string
+
 	if useProxy {
 		obs := fetcher.sniffer.obs
-		proxy_, _ = obs.yield()
+		proxy_, _, _ = obs.yieldWithCookies()
 	}
 
 	_, err := fetcher.fetchGeneric(
 		url_,
 		"GET",
+		nil,
 		nil,
 		proxy_,
 		30*time.Second,
@@ -266,9 +301,11 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	}
 
 	var concurrentRtnCount, maxConcurrentRtn int
-	doneChannel := make(chan struct{})
+	workerDoneChannel := make(chan struct{})
+	jobDoneChannel := make(chan struct{})
+
 	indexChannel := make(chan int)
-	observerChannel := make(chan int)
+	observerChannel := make(chan string)
 
 	var failCount int
 	var successCount int
@@ -287,12 +324,11 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	/* Step 1: launch observer routine */
 	go func() {
 		for {
-			index, ok := <-observerChannel
+			message, ok := <-observerChannel
 			if !ok {
 				break
 			} else {
-				log.Printf("Threads - %2d, Latest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d\n",
-					concurrentRtnCount, index, count, successCount, failCount)
+				log.Println(message)
 			}
 		}
 	}()
@@ -300,79 +336,111 @@ func (fetcher *nineOneFetcher) fetchVideoList(count int, useProxy bool) (string,
 	/* Step 2: launch worker routines */
 	for i := 0; i < concurrentRtnCount; i += 1 {
 		go func() {
-			proxy := ""
+			var proxy string
+			var siteToken []*http.Cookie
+
 			if useProxy {
-				proxy, _ = obs.yield()
-				log.Printf("yield proxy - %s\n", proxy)
+				proxy, err = obs.yield()
+				if err != nil {
+					observerChannel <- fmt.Sprintf("%v", err)
+					workerDoneChannel <- struct{}{}
+					return
+				}
+
+				siteToken, err = fetcher.getSiteToken(proxy)
+				if err != nil {
+					observerChannel <- fmt.Sprintf("%v", err)
+					workerDoneChannel <- struct{}{}
+					return
+				}
+
+				observerChannel <- fmt.Sprintf("yield proxy - %s", proxy)
+			} else {
+				siteToken, err = fetcher.getSiteToken(proxy)
+
+				if err != nil {
+					observerChannel <- fmt.Sprintf("%v", err)
+					workerDoneChannel <- struct{}{}
+					return
+				}
 			}
 
 			for {
 				index, ok := <-indexChannel
 				if !ok {
-					doneChannel <- struct{}{}
-					obs.release(proxy)
+					//workerDoneChannel <- struct{}{}
+					//obs.release(proxy)
 					break
 				}
 
 				src := fmt.Sprintf(confmgr.config.listPageURLBase+"%d", index+1)
-				log.Printf("proxy - %s, src - %s\n", proxy, src)
+				observerChannel <- fmt.Sprintf("proxy - %s, src - %s", proxy, src)
 
-				if info, err := fetcher.get(src, proxy); err != nil {
+				if info, err := fetcher.get(src, siteToken, proxy); err != nil {
 					failCount += 1
 					failIndexList = append(failIndexList, index)
 
 					/* if failed, exit */
 					concurrentRtnCount -= 1
-					obs.release(proxy)
+					//obs.release(proxy)
 
-					log.Printf("proxy - %s fail, exit\n", proxy)
-					doneChannel <- struct{}{}
+					observerChannel <- fmt.Sprintf("proxy - %s fail, exit", proxy)
+					indexChannel <- index
+					workerDoneChannel <- struct{}{}
 					break
 				} else {
-					/* TODO: return result may be banned */
 					successCount += 1
-					observerChannel <- index
+					observerChannel <- fmt.Sprintf("Threads - %2d, Latest Done Index - %4d, Total - %4d, Success - %4d, Fail - %4d",
+						concurrentRtnCount, index, count, successCount, failCount)
 
 					htmlFile := filepath.Join(dir, fmt.Sprintf("%04d.html", index+1))
 					err = ioutil.WriteFile(htmlFile, info, 0644)
 					if err != nil {
 						log.Fatal(err)
 					}
+					jobDoneChannel <- struct{}{}
 				}
 			}
 		}()
 	}
 
+	/* Step 3: dispatch task to worker routines */
 	go func(count_ int) {
-		/* Step 3: dispatch task to worker routines */
 		log.Printf("dispatch task to worker routines, task count - %d\n", count_)
 
 		for i := 0; i < count_; i += 1 {
 			indexChannel <- i
 		}
-
-		/* Step 4 (Optional): retry the failed tasks*/
-		log.Println("retry the failed tasks")
-
-		if len(failIndexList) > 0 {
-			for _, index := range failIndexList {
-				indexChannel <- index
-			}
-		}
-
-		log.Println("close index channel")
-		close(indexChannel)
 	}(count)
 
-	/* Step 5: wait till all the worker routines have been finished */
-	for i := 0; i < maxConcurrentRtn; i += 1 {
-		<-doneChannel
-		log.Printf("done channels - [ %2d of %2d ]\n", i+1, maxConcurrentRtn)
+	/* Step 4: wait for all jobs been done or all workers terminated */
+	var workerDoneCount, jobDoneCount int
+	for {
+		select {
+		case <-workerDoneChannel:
+			workerDoneCount++
+			observerChannel <- fmt.Sprintf("done workerss - [ %2d of %2d ]", workerDoneCount, maxConcurrentRtn)
+
+		case <-jobDoneChannel:
+			jobDoneCount++
+		}
+
+		if workerDoneCount == maxConcurrentRtn || jobDoneCount == count {
+			break
+		}
 	}
 
 	log.Println("close observer channel")
 	close(observerChannel)
-	// log.Printf("\n")
+
+	log.Println("close index channel")
+	close(indexChannel)
+
+	log.Println("worker done channel")
+	close(workerDoneChannel)
+
+	log.Println("job done channel")
+	close(jobDoneChannel)
 
 	return dir, nil
 }
@@ -465,17 +533,31 @@ func (fetcher *nineOneFetcher) fetchThumbnails(script bool) {
 	//os.Remove("./thumbnails_dl.sh")
 }
 
-func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool, useProxy bool) error {
+func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bool, useProxy bool) (err error) {
 	confmgr := fetcher.sniffer.confmgr
+
+	var proxy_ string
+	var siteToken []*http.Cookie
 
 	if len(url) == 0 {
 		return fmt.Errorf("url shouldn't be empty")
 	}
 
-	obs := fetcher.sniffer.obs
-	proxy_, _ := obs.yield()
+	if useProxy {
+		obs := fetcher.sniffer.obs
+		proxy_, siteToken, err = obs.yieldWithCookies()
+		if err != nil {
+			return err
+		}
+	} else {
+		siteToken, err = fetcher.getSiteToken(proxy_)
 
-	content, err := fetcher.get(url, proxy_)
+		if err != nil {
+			return err
+		}
+	}
+
+	content, err := fetcher.get(url, siteToken, proxy_)
 	if err != nil {
 		return err
 	}
@@ -684,7 +766,8 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge(useProxy bool) error {
 	return nil
 }
 
-func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string, error) {
+/*
+func (fetcher *nineOneFetcher) queryHttpResourceLengthAndDate(url string) (int, string, error) {
 	cfg := &tls.Config{
 		MinVersion:               tls.VersionTLS12,
 		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
@@ -725,4 +808,93 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string) (int, string,
 	length, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
 	lastModifiedTime := resp.Header.Get("Last-Modified")
 	return length, lastModifiedTime, nil
+}
+*/
+
+func (fetcher *nineOneFetcher) queryHttpResourceLength(url string, proxy string) (int, error) {
+	var length int
+
+	f := func(resp *http.Response, body []byte, data interface{}) error {
+		l := data.(*int)
+		*l, _ = strconv.Atoi(resp.Header.Get("Content-Length"))
+		return nil
+	}
+
+	err := fetcher.head(url, nil, proxy, f, &length)
+
+	return length, err
+}
+
+func (fetcher *nineOneFetcher) queryHttpResourceDate(url string, proxy string) (string, error) {
+	var lastModifiedTime string
+
+	f := func(resp *http.Response, body []byte, data interface{}) error {
+		t := data.(*string)
+		*t = resp.Header.Get("Last-Modified")
+		return nil
+	}
+
+	err := fetcher.head(url, nil, proxy, f, &lastModifiedTime)
+
+	return lastModifiedTime, err
+}
+
+func (fetcher *nineOneFetcher) getCookies(proxy string) (cookies map[string]string, err error) {
+	f := func(resp *http.Response, body []byte, data interface{}) error {
+		respCookies := data.(*map[string]string)
+
+		c := resp.Cookies()
+
+		for _, c_ := range c {
+			(*respCookies)[c_.Name] = c_.Value
+		}
+
+		//fmt.Println(respCookies)
+		//fmt.Println(resp.Header.Values("Set-Cookie"))
+
+		return nil
+	}
+
+	cookies = make(map[string]string)
+	confmgr := fetcher.sniffer.confmgr
+
+	_, err = fetcher.fetchGeneric(
+		confmgr.config.listPageURLBase+"1",
+		"GET",
+		nil,
+		nil,
+		proxy,
+		30*time.Second,
+		f,
+		&cookies,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	//fmt.Println(cookies)
+
+	return cookies, nil
+}
+
+func (fetcher *nineOneFetcher) getSiteToken(proxy string) (siteToken []*http.Cookie, err error) {
+	c, err := fetcher.getCookies(proxy)
+	confmgr := fetcher.sniffer.confmgr
+
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range c {
+		siteToken = append(siteToken, &http.Cookie{
+			Name:     k,
+			Value:    v,
+			HttpOnly: true,
+			Path:     "/",
+			Domain:   confmgr.config.baseURL,
+		})
+	}
+
+	return siteToken, nil
 }

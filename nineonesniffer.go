@@ -101,8 +101,8 @@ func (sniffer *NineOneSniffer) RefreshDataset(dirname string, keep bool) {
 	fmt.Printf("Got %d items\n", sniffer.vds.size())
 }
 
-func (sniffer *NineOneSniffer) IdentifyVideoUploadedDate() {
-	sniffer.parser.identifyVideoUploadedDate()
+func (sniffer *NineOneSniffer) IdentifyVideoUploadedDate(useProxy bool) {
+	sniffer.parser.identifyVideoUploadedDate(useProxy)
 }
 
 func (sniffer *NineOneSniffer) Persist() {

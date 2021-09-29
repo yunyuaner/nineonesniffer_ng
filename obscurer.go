@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -16,11 +17,30 @@ import (
 type obsProxyItem struct {
 	proxy string
 	inUse bool
+	token string
 }
 
 type obscurer struct {
 	proxies []*obsProxyItem
 	sniffer *NineOneSniffer
+}
+
+func (obs *obscurer) yieldWithCookies() (string, []*http.Cookie, error) {
+	fetcher := obs.sniffer.fetcher
+
+	for _, item := range obs.proxies {
+		if !item.inUse {
+			item.inUse = true
+			siteToken, err := fetcher.getSiteToken(item.proxy)
+			if err != nil {
+				continue
+			}
+
+			return item.proxy, siteToken, nil
+		}
+	}
+
+	return "", nil, fmt.Errorf("No more proxy available")
 }
 
 func (obs *obscurer) yield() (string, error) {
@@ -31,7 +51,7 @@ func (obs *obscurer) yield() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("Not more proxy available")
+	return "", fmt.Errorf("No more proxy available")
 }
 
 func (obs *obscurer) release(proxy string) {
@@ -50,7 +70,7 @@ func (obs *obscurer) queryhideme() (proxy []string) {
 	fetcher := obs.sniffer.fetcher
 	parser := obs.sniffer.parser
 
-	data, err := fetcher.get("https://hidemy.name/en/proxy-list/?type=5", "")
+	data, err := fetcher.get("https://hidemy.name/en/proxy-list/?type=5", nil, "")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -118,7 +138,7 @@ func (obs *obscurer) queryspys() (proxy []string) {
 		"xf5": "2",
 	}
 
-	data, err := fetcher.post("https://spys.one/en/socks-proxy-list/", formData, "")
+	data, err := fetcher.post("https://spys.one/en/socks-proxy-list/", formData, nil, "")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -258,7 +278,7 @@ func (obs *obscurer) proxyInvalidate() {
 
 	for _, proxy := range spys {
 		fmt.Printf("Tring %s", proxy)
-		if _, err := fetcher.fetchGeneric(tryURL, "GET", nil, proxy, 30*time.Second, nil, nil); err != nil {
+		if _, err := fetcher.fetchGeneric(tryURL, "GET", nil, nil, proxy, 30*time.Second, nil, nil); err != nil {
 			fmt.Printf(" fail\n")
 		} else {
 			fmt.Printf(" success\n")
