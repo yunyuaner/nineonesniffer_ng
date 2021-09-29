@@ -886,7 +886,7 @@ func (fetcher *nineOneFetcher) getSiteToken(proxy string) (siteToken []*http.Coo
 		return nil, err
 	}
 
-	if _, ok := c["covid"]; ok {
+	if _, ok := c["covid87"]; ok {
 		siteToken = []*http.Cookie{
 			&http.Cookie{
 				Name:     siteTokenName,
