@@ -714,7 +714,7 @@ func (fetcher *nineOneFetcher) fetchVideoPartsByNameWithWorkers(filename string,
 	if fetcher.sniffer.Transcode {
 		var cmd *exec.Cmd
 		cmd = exec.Command("ffmpeg", "-i", confmgr.config.videoMergedDir+"/"+finalFileName+".ts", "-c:v",
-			"libx264", "-c:a", "aac", "-strict", "-2", confmgr.config.videoMergedDir+"/"+finalFileName+".mp4")
+			"h264_qsv", "-c:a", "aac", "-strict", "-2", confmgr.config.videoMergedDir+"/"+finalFileName+".mp4")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err := cmd.Run()
@@ -765,51 +765,6 @@ func (fetcher *nineOneFetcher) fetchVideoPartsAndMerge(useProxy bool) error {
 
 	return nil
 }
-
-/*
-func (fetcher *nineOneFetcher) queryHttpResourceLengthAndDate(url string) (int, string, error) {
-	cfg := &tls.Config{
-		MinVersion:               tls.VersionTLS12,
-		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
-		PreferServerCipherSuites: true,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-		},
-	}
-
-	tr := &http.Transport{
-		MaxIdleConns:       10,
-		IdleConnTimeout:    60 * time.Second,
-		DisableCompression: true,
-		TLSClientConfig:    cfg,
-	}
-
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   120 * time.Second,
-	}
-
-	resp, err := client.Head(url)
-	if err != nil {
-		return -1, "", err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Println(resp.Status)
-		err = fmt.Errorf("http status code - %v\n", resp.StatusCode)
-		return -1, "", err
-	}
-
-	length, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-	lastModifiedTime := resp.Header.Get("Last-Modified")
-	return length, lastModifiedTime, nil
-}
-*/
 
 func (fetcher *nineOneFetcher) queryHttpResourceLength(url string, proxy string) (int, error) {
 	var length int
