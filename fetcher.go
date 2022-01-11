@@ -104,7 +104,7 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 	var useHttps, useProxy bool
 	var contextDialer proxy.ContextDialer
 
-	//fmt.Printf("src - %s\n", url_)
+	// fmt.Printf("src - %s\n", url_)
 
 	if strings.ToLower(method) == "post" && formData != nil && len(formData) > 0 {
 		form := url.Values{}
@@ -124,10 +124,8 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		}
 	}
 
-	if cookies != nil {
-		for _, c := range cookies {
-			req.AddCookie(c)
-		}
+	for _, c := range cookies {
+		req.AddCookie(c)
 	}
 
 	req.Header.Set("User-Agent", fetcher.userAgent)
@@ -208,9 +206,13 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		return nil, err
 	}
 
-	if resp.StatusCode != 200 && resp.StatusCode != 302 {
+	if resp.StatusCode != 200 && resp.StatusCode != 302 && resp.StatusCode != 301 {
 		err = errors.New("resp.StatusCode: " + strconv.Itoa(resp.StatusCode))
 		return nil, err
+	}
+
+	if resp.StatusCode == 301 {
+		// fmt.Printf("301 Moved Permanently to %s\n", resp.Header.Get("Location"))
 	}
 
 	defer resp.Body.Close()
@@ -227,13 +229,17 @@ func (fetcher *nineOneFetcher) fetchGeneric(
 		return nil, err
 	}
 
-	//fmt.Println(string(body))
+	// fmt.Println(string(body))
 
 	if callback != nil {
-		callback(resp, body, data)
+		err = callback(resp, body, data)
 	}
 
-	return body, nil
+	if err != nil {
+		return nil, err
+	} else {
+		return body, nil
+	}
 }
 
 func (fetcher *nineOneFetcher) wget(url_ string, outputFile string, useProxy bool) error {
@@ -781,17 +787,29 @@ func (fetcher *nineOneFetcher) queryHttpResourceLength(url string, proxy string)
 }
 
 func (fetcher *nineOneFetcher) queryHttpResourceDate(url string, proxy string) (string, error) {
-	var lastModifiedTime string
+	var httpHeaderValue string
 
 	f := func(resp *http.Response, body []byte, data interface{}) error {
 		t := data.(*string)
+
+		if resp.StatusCode == 301 {
+			*t = resp.Header.Get("Location")
+			return fmt.Errorf("301 Moved Permanently")
+		}
+
 		*t = resp.Header.Get("Last-Modified")
 		return nil
 	}
 
-	err := fetcher.head(url, nil, proxy, f, &lastModifiedTime)
+	err := fetcher.head(url, nil, proxy, f, &httpHeaderValue)
 
-	return lastModifiedTime, err
+	if err != nil {
+		//newLocation := strings.Replace(httpHeaderValue, "https", "http", 1)
+		//return fetcher.queryHttpResourceDate(newLocation, proxy)
+		return fetcher.queryHttpResourceDate(httpHeaderValue, proxy)
+	} else {
+		return httpHeaderValue, err
+	}
 }
 
 func (fetcher *nineOneFetcher) getCookies(proxy string) (cookies map[string]string, err error) {
