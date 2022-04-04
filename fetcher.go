@@ -570,10 +570,10 @@ func (fetcher *nineOneFetcher) fetchVideoPartsDescriptor(url string, saveToDb bo
 
 	if strings.Contains(string(content), "Sorry, the page can not found!") {
 		return fmt.Errorf("This video may have been removed, now stop!")
-	}
-
-	if strings.Contains(string(content), "Sorry, you can only watch 15 videos per day as guest") {
-		return fmt.Errorf("Up limit reached, now stop!")
+	} else if strings.Contains(string(content), "Sorry, you can only watch 15 videos per day as guest") {
+		return fmt.Errorf("Up limit reached (15 videos per day as guest), now stop!")
+	} else if strings.Contains(string(content), "Sorry, you can only watch 10 videos per day as guest") {
+		return fmt.Errorf("Up limit reached (10 videos per day as guest), now stop!")
 	}
 
 	sniffer := *fetcher.sniffer
